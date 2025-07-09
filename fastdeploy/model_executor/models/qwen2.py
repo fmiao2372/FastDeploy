@@ -34,7 +34,6 @@ from fastdeploy.model_executor.layers.linear import (
 from fastdeploy.model_executor.layers.lm_head import ParallelLMHead
 from fastdeploy.model_executor.layers.normalization import RMSNorm
 from fastdeploy.model_executor.models.model_base import ModelForCasualLM
-from fastdeploy.model_executor.models.qwen2_hpu import Qwen2Model_HPU
 from fastdeploy.platforms import current_platform
 from fastdeploy.worker.forward_meta import ForwardMeta
 
