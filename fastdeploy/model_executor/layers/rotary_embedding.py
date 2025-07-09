@@ -66,7 +66,7 @@ class ErnieRotaryEmbedding:
         emb = paddle.unsqueeze(emb, 2)
         rot_emb[0] = paddle.cos(emb)
         rot_emb[1] = paddle.sin(emb)
-        if paddle.is_compiled_with_custom_device("npu"):
+        if paddle.is_compiled_with_custom_device("npu") or paddle.is_compiled_with_custom_device("intel_hpu"):
             return (paddle.concat([rot_emb, rot_emb], axis=3).transpose(
                 [0, 1, 2, 4,
                  3]).reshape([2, bsz, max_seq_len, 1, self.rotary_dim]))

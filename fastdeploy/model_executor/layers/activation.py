@@ -66,6 +66,8 @@ class SiluAndMul(nn.Layer):
         if current_platform.is_cuda() or current_platform.is_xpu(
         ) or current_platform.is_iluvatar():
             self.forward = self.forward_cuda
+        elif current_platform.is_intel_hpu():
+            self.forward = self.forward_intel_hpu
         else:
             raise NotImplementedError
 
@@ -123,3 +125,13 @@ class SiluAndMul(nn.Layer):
             quant_max_bound=self.quant_max_bound,
             quant_min_bound=self.quant_min_bound,
         )
+
+    def forward_intel_hpu(self, x):
+        """
+        Forward propagation of the custom activation layer.
+        Args:
+            x (Tensor): Input tensor to the activation layer.
+        Returns:
+            Tensor: Output tensor.
+        """
+        return

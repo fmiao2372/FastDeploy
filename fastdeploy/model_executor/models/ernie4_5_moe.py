@@ -26,8 +26,8 @@ from paddleformers.transformers import PretrainedModel
 from paddleformers.utils.log import logger
 
 from fastdeploy.config import FDConfig, ModelConfig
-from fastdeploy.model_executor.graph_optimization.decorator import \
-    support_graph_optimization
+# from fastdeploy.model_executor.graph_optimization.decorator import \
+#     support_graph_optimization
 from fastdeploy.model_executor.layers.activation import SiluAndMul
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
@@ -37,6 +37,8 @@ from fastdeploy.model_executor.layers.lm_head import ParallelLMHead
 from fastdeploy.model_executor.layers.moe.moe import FusedMoE
 from fastdeploy.model_executor.layers.normalization import RMSNorm
 from fastdeploy.model_executor.models.model_base import ModelForCasualLM
+from fastdeploy.model_executor.models.ernie_text_hpu import Ernie45TModel_HPU
+from fastdeploy.platforms import current_platform
 from fastdeploy.model_executor.models.tp_utils import TensorSplitMode as tsm
 from fastdeploy.model_executor.models.utils import \
     LayerIdPlaceholder as layerid
@@ -331,7 +333,7 @@ class Ernie4_5_DecoderLayer(nn.Layer):
         return hidden_states, residual
 
 
-@support_graph_optimization
+# @support_graph_optimization
 class Ernie4_5_Model(nn.Layer):
 
     def __init__(
@@ -417,7 +419,10 @@ class Ernie4_5_MoeForCausalLM(ModelForCasualLM):
         """
         super(Ernie4_5_MoeForCausalLM, self).__init__(fd_config)
         self.fd_config = fd_config
-        self.model = Ernie4_5_Model(fd_config=fd_config)
+        if current_platform.is_intel_hpu():
+            self.model = Ernie45TModel_HPU(fd_config=fd_config)
+        else:
+            self.model = Ernie4_5_Model(fd_config=fd_config)
 
         self.ori_vocab_size = fd_config.model_config.ori_vocab_size
 

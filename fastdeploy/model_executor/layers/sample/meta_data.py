@@ -28,6 +28,13 @@ class SamplingMetadata:
 
     temperature: paddle.Tensor
 
+    # ================ 
+    # Add for HPU post-processing
+    prompt_token_ids: paddle.Tensor
+    stop_flags: paddle.Tensor
+    seq_lens_encoder: paddle.Tensor
+    seq_lens_decoder: paddle.Tensor
+    # ================
     pre_token_ids: paddle.Tensor
     eos_token_ids: paddle.Tensor
     frequency_penalties: paddle.Tensor

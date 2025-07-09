@@ -20,6 +20,7 @@ from .cuda import CUDAPlatform
 from .cpu import CPUPlatform
 from .xpu import XPUPlatform
 from .npu import NPUPlatform
+from .intel_hpu import INTEL_HPUPlatform
 from .dcu import DCUPlatform
 from .iluvatar import IluvatarPlatform
 from .base import _Backend  # noqa: F401
@@ -38,6 +39,8 @@ def __getattr__(name: str):
                 _current_platform = XPUPlatform()
             elif paddle.is_compiled_with_custom_device("npu"):
                 _current_platform = NPUPlatform()
+            elif paddle.is_compiled_with_custom_device("intel_hpu"):
+                _current_platform = INTEL_HPUPlatform()
             elif paddle.is_compiled_with_rocm():
                 _current_platform = DCUPlatform()
             elif paddle.is_compiled_with_custom_device("iluvatar_gpu"):

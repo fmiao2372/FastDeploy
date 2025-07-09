@@ -173,6 +173,8 @@ class Sampler(nn.Layer):
         if current_platform.is_cuda() or current_platform.is_xpu(
         ) or current_platform.is_iluvatar():
             self.forward = self.forward_cuda
+        elif current_platform.is_intel_hpu():
+            self.forward = self.forward_intel_hpu
         else:
             raise NotImplementedError()
 
@@ -219,6 +221,42 @@ class Sampler(nn.Layer):
         self.processor.update_output_tokens(next_tokens, skip_idx_list)
         return next_tokens
 
+    def forward_intel_hpu(
+        self,
+        logits: paddle.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> paddle.Tensor:
+        """
+        """
+
+        logits = paddle.cast(logits, paddle.float32)
+
+        from fastdeploy.model_executor.ops.intel_hpu import set_preids_token_penalty_multi_scores
+
+        set_preids_token_penalty_multi_scores(
+            sampling_metadata.pre_token_ids,
+            sampling_metadata.prompt_token_ids,
+            sampling_metadata.seq_lens_encoder,
+            sampling_metadata.seq_lens_decoder,
+            sampling_metadata.step_idx,
+            sampling_metadata.stop_flags,
+            logits,
+            sampling_metadata.repetition_penalties,
+            sampling_metadata.frequency_penalties,
+            sampling_metadata.presence_penalties,
+            sampling_metadata.temperature,
+            sampling_metadata.bad_words_token_ids,
+            sampling_metadata.step_idx,
+            sampling_metadata.min_dec_lens,
+            sampling_metadata.eos_token_ids,
+        )
+
+        probs = F.softmax(logits)
+
+        _, next_tokens = paddle.tensor.top_p_sampling(probs,
+                                                      sampling_metadata.top_p)
+
+        return next_tokens
 
 class SpeculativeSampler(nn.Layer):
     """

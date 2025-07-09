@@ -167,6 +167,8 @@ def get_device_type():
         return "npu"
     elif paddle.is_compiled_with_custom_device('iluvatar_gpu'):
         return "iluvatar-gpu"
+    elif paddle.is_compiled_with_custom_device('intel_hpu'):
+        return "intel-hpu"
     else:
         return "cpu"
 

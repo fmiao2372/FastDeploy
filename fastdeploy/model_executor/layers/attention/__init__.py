@@ -13,16 +13,20 @@
 # limitations under the License.
 
 from .append_attn_backend import AppendAttentionBackend
+from .attention import Attention, Attention_HPU
+from .base_attention_backend import AttentionBackend, AttentionBackend_HPU
 from .attention_selecter import get_attention_backend
 from .base_attention_backend import AttentionBackend
 from .flash_attn_backend import FlashAttentionBackend
 from .mla_attention_backend import MLAAttentionBackend
 from .native_paddle_backend import PaddleNativeAttnBackend
+from .block_attn_backend import BlockAttentionBackend
 from .xpu_attn_backend import XPUAttentionBackend
 from .iluvatar_attn_backend import IluvatarAttnBackend
 
 __all__ = [
-    "AttentionBackend", "PaddleNativeAttnBackend",
+    "Attention","Attention_HPU","AttentionBackend",
+    "AttentionBackend_HPU","PaddleNativeAttnBackend",
     "get_attention_backend", "AppendAttentionBackend", "XPUAttentionBackend",
-    "MLAAttentionBackend", "FlashAttentionBackend", "IluvatarAttnBackend"
+    "MLAAttentionBackend", "FlashAttentionBackend", "IluvatarAttnBackend","BlockAttentionBackend"
 ]

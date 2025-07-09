@@ -112,6 +112,13 @@ function copy_ops(){
       echo -e "BASE and Iluvatar ops have been copy to fastdeploy"
       return
     fi
+    is_intel_hpu=`$python -c "import paddle; print(paddle.is_compiled_with_custom_device('intel_hpu'))"`
+    if [ "$is_intel_hpu" = "True" ]; then
+      DEVICE_TYPE="intel-hpu"
+      #cp -r ${OPS_TMP_DIR}/${WHEEL_NAME}/* ../fastdeploy/model_executor/ops/intel_hpu
+      echo -e "intel_hpu ops have been copy to fastdeploy"
+      return
+    fi
 
     DEVICE_TYPE="cpu"
     cp -r ./${OPS_TMP_DIR_BASE}/${WHEEL_BASE_NAME}/* ../fastdeploy/model_executor/ops/base
@@ -147,7 +154,7 @@ function build_and_install_ops() {
     else
       FD_BUILDING_ARCS=${FD_BUILDING_ARCS} ${python} setup_ops.py install --install-lib ${OPS_TMP_DIR}
     fi
-    find ${OPS_TMP_DIR} -type f -name "*.o" -exec rm -f {} \;
+    # find ${OPS_TMP_DIR} -type f -name "*.o" -exec rm -f {} \;
   else
       echo "Error: Invalid parameter '$FD_CPU_USE_BF16'. Please use true or false."
       exit 1
@@ -179,13 +186,13 @@ function version_info() {
   fastdeploy_git_commit_id=$(git rev-parse HEAD)
   paddle_version=$(${python} -c "import paddle; print(paddle.__version__)")
   paddle_git_commit_id=$(${python} -c "import paddle; print(paddle.__git_commit__)")
-  cuda_version=$(nvcc -V | grep -Po "(?<=release )[\d.]+(?=, V)")
+  # cuda_version=$(nvcc -V | grep -Po "(?<=release )[\d.]+(?=, V)")
   cxx_version=$(g++ --version | head -n 1 | grep -Po "(?<=\) )[\d.]+")
 
   echo "fastdeploy GIT COMMIT ID: $fastdeploy_git_commit_id" > $output_file
   echo "Paddle version: $paddle_version" >> $output_file
   echo "Paddle GIT COMMIT ID: $paddle_git_commit_id" >> $output_file
-  echo "CUDA version: $cuda_version" >> $output_file
+  # echo "CUDA version: $cuda_version" >> $output_file
   echo "CXX compiler version: $cxx_version" >> $output_file
 }
 

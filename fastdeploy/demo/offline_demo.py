@@ -17,12 +17,14 @@
 from fastdeploy.engine.sampling_params import SamplingParams
 from fastdeploy.entrypoints.llm import LLM
 
-model_name_or_path = "./models/llama-7b"
+model_name_or_path = "/data/disk2/ckpt/Qwen/Qwen2.5-7B-Instruct"
+# model_name_or_path = "/data/disk2/ERNIE-4.5-21B-A3B-Paddle"
+# model_name_or_path = "/data/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle/"
 
 # 超参设置
-sampling_params = SamplingParams(temperature=0.1, max_tokens=30)
-llm = LLM(model=model_name_or_path, tensor_parallel_size=1)
-output = llm.generate(prompts="who are you？",
+sampling_params = SamplingParams(temperature=1.0, max_tokens=32)
+llm = LLM(model=model_name_or_path, tensor_parallel_size=1, engine_worker_queue_port=8888, num_gpu_blocks_override=1000)
+output = llm.generate(prompts="who are you?",
                       use_tqdm=True,
                       sampling_params=sampling_params)
 
