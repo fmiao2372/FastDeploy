@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""fastdeploy module"""
-from . import gpu
-from . import cpu
-from . import xpu
-from . import npu
-from . import iluvatar
-from . import intel_hpu
+"""fastdeploy intel_hpu ops."""
 
-__all__ = ["gpu", "cpu", "xpu", "npu", "iluvatar", "intel_hpu"]
+from fastdeploy.import_ops import import_custom_ops, rename_imported_op
+
+# PACKAGE = "fastdeploy.model_executor.ops.intel_hpu"
+PACKAGE = "paddlenlp_ops"
+
+import_custom_ops(PACKAGE, "paddlenlp_ops", globals())

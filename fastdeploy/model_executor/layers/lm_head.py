@@ -59,6 +59,8 @@ class ParallelLMHead(nn.Layer):
             self.linear_bias_key: Optional[str] = None
         self.use_ep: bool = fd_config.parallel_config.use_ep
         self.column_cut = True
+        # disable fused linear because of low level not support
+        self.fused_linear = False
 
         ColumnParallelLinear = fleet.meta_parallel.ColumnParallelLinear
         RowParallelLinear = fleet.meta_parallel.RowParallelLinear
@@ -83,7 +85,7 @@ class ParallelLMHead(nn.Layer):
                     has_bias=True
                     if self.linear_bias_key is not None else False,
                     gather_output=need_gather,
-                    fuse_matmul_bias=False,  # False diff更小
+                    fuse_matmul_bias=self.fused_linear,  # False diff更小
                 )
             else:
                 self.out_linear = RowParallelLinear(
@@ -95,7 +97,7 @@ class ParallelLMHead(nn.Layer):
                     has_bias=True
                     if self.linear_bias_key is not None else False,
                     input_is_parallel=False,
-                    fuse_matmul_bias=False,  # False diff更小
+                    fuse_matmul_bias=self.fused_linear,  # False diff更小
                 )
 
     def load_state_dict(self, state_dict: Dict[str,

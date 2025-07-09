@@ -24,6 +24,8 @@ if current_platform.is_iluvatar():
     from fastdeploy.model_executor.ops.iluvatar import (
         get_padding_offset, save_output, set_stop_value_multi_ends,
         step_paddle, update_inputs)
+elif current_platform.is_intel_hpu():
+    pass
 else:
     from fastdeploy.model_executor.ops.gpu import (
         get_padding_offset, save_output, set_stop_value_multi_ends,

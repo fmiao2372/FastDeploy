@@ -124,6 +124,8 @@ class TokenProcessor(object):
             from fastdeploy.model_executor.ops.xpu import get_output
         elif current_platform.is_iluvatar():
             from fastdeploy.model_executor.ops.iluvatar import get_output
+        elif current_platform.is_intel_hpu():
+            from fastdeploy.model_executor.ops.intel_hpu import get_output
         else:
             from fastdeploy.model_executor.ops.gpu import (get_output,
                                                            get_output_ep,
