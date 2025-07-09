@@ -497,7 +497,6 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
                  model_output: ModelOutputData) -> None:
     """ Post-processing steps after completing a single token generation. """
-    from paddlenlp_ops import update_inputs_v2
 
     update_inputs_v2(
         model_output.stop_flags,
@@ -515,8 +514,6 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
         model_output.next_tokens,
     )
 
-
-    from paddlenlp_ops import save_output
 
     save_output(
         sampled_token_ids,

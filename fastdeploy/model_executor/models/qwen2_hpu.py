@@ -25,7 +25,7 @@ from fastdeploy.utils import console_logger as logger
 
 from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.layers.activation import SiluAndMul
-from fastdeploy.model_executor.layers.attention import Attention_HPU
+from fastdeploy.model_executor.layers.attention.attention import Attention_HPU
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
 from fastdeploy.model_executor.layers.linear_hpu import (
     MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear)

@@ -37,7 +37,6 @@ from fastdeploy.model_executor.layers.lm_head import ParallelLMHead
 from fastdeploy.model_executor.layers.moe.moe import FusedMoE
 from fastdeploy.model_executor.layers.normalization import RMSNorm
 from fastdeploy.model_executor.models.model_base import ModelForCasualLM
-from fastdeploy.model_executor.models.ernie_text_hpu import Ernie45TModel_HPU
 from fastdeploy.platforms import current_platform
 from fastdeploy.model_executor.models.tp_utils import TensorSplitMode as tsm
 from fastdeploy.model_executor.models.utils import \
@@ -420,6 +419,7 @@ class Ernie4_5_MoeForCausalLM(ModelForCasualLM):
         super(Ernie4_5_MoeForCausalLM, self).__init__(fd_config)
         self.fd_config = fd_config
         if current_platform.is_intel_hpu():
+            from fastdeploy.model_executor.models.ernie_text_hpu import Ernie45TModel_HPU
             self.model = Ernie45TModel_HPU(fd_config=fd_config)
         else:
             self.model = Ernie4_5_Model(fd_config=fd_config)
