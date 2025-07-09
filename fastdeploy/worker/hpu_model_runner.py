@@ -15,7 +15,7 @@
 """
 import os
 import time
-from typing import List, Optional
+from typing import List, Dict, Optional
 
 import numpy as np
 import paddle
@@ -35,14 +35,122 @@ from fastdeploy.model_executor.layers.sample.meta_data import SamplingMetadata
 from fastdeploy.model_executor.layers.sample.sampler import (
     Sampler, SpeculativeSampler)
 from fastdeploy.model_executor.model_loader import get_model_from_loader
-from fastdeploy.model_executor.pre_and_post_process import (post_process_hpu,
-                                                            rebuild_padding,
-                                                            step_cuda)
 # from fastdeploy.spec_decode import MTPProposer, NgramProposer
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
+from fastdeploy.model_executor.ops.intel_hpu import (save_output, step_paddle, update_inputs_v2)
 
+def post_process_hpu(sampled_token_ids: paddle.Tensor,
+                 model_output: ModelOutputData) -> None:
+    """ Post-processing steps after completing a single token generation. """
+
+    update_inputs_v2(
+        model_output.stop_flags,
+        model_output.step_idx,
+        model_output.not_need_stop,
+        model_output.seq_lens_this_time,
+        model_output.seq_lens_encoder,
+        model_output.seq_lens_decoder,
+        model_output.max_dec_len,
+        model_output.input_ids,
+        model_output.stop_nums,
+        sampled_token_ids,
+        model_output.is_block_step,
+        model_output.eos_token_id,
+        model_output.next_tokens,
+    )
+
+
+    save_output(
+        sampled_token_ids,
+        model_output.not_need_stop,
+        model_output.mp_rank,
+    )
+
+def recover_block(self,
+                recover_block_list,   #cpu
+                recover_len,          #cpu
+                stop_flags,           #hpu
+                seq_lens_this_time,   #hpu
+                ori_seq_lens_encoder, #cpu
+                seq_lens_encoder,     #hpu
+                block_tables,         #cpu
+                free_list,            #cpu
+                free_list_len,        #cpu
+                input_ids,            #hpu
+                pre_ids,              #hpu
+                step_idx,             #hpu
+                encoder_block_lens,   #cpu
+                used_list_len,        #cpu
+                next_tokens,          #hpu
+                first_token_ids):     #hpu
+
+    for bid in range(recover_len.item()):
+        recover_id = recover_block_list[bid].item()
+        ori_seq_len_encoder = ori_seq_lens_encoder[recover_id].item()
+        step_idx_now = step_idx[recover_id].item()
+        seq_len = ori_seq_len_encoder + step_idx_now
+        encoder_block_len = encoder_block_lens[recover_id].item()
+        decoder_used_len = used_list_len[recover_id].item()
+
+        seq_lens_this_time[recover_id] = seq_len
+        seq_lens_encoder[recover_id] = seq_len
+        stop_flags[recover_id] = False
+
+        ori_free_list_len = free_list_len[0]
+        free_list_len[0] -= decoder_used_len
+
+        for i in range(decoder_used_len):
+            block_tables[recover_id, encoder_block_len + i] = free_list[ori_free_list_len - i - 1]
+
+        recover_block(input_ids, first_token_ids, pre_ids, next_tokens, recover_id, ori_seq_len_encoder, step_idx_now)
+
+def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
+              max_model_len: int) -> None:
+    """
+    step cuda
+    """
+    step_paddle(
+        share_inputs["stop_flags"],
+        share_inputs["seq_lens_this_time"],
+        share_inputs["seq_lens_encoder"],
+        share_inputs["seq_lens_decoder"],
+        share_inputs["block_tables"],
+        share_inputs["encoder_block_lens"],
+        share_inputs["is_block_step"],
+        share_inputs["step_block_list"],
+        share_inputs["step_lens"],
+        share_inputs["recover_block_list"],
+        share_inputs["recover_lens"],
+        share_inputs["need_block_list"],
+        share_inputs["need_block_len"],
+        share_inputs["used_list_len"],
+        share_inputs["free_list"],
+        share_inputs["free_list_len"],
+        share_inputs["first_token_ids"],
+        block_size,
+        max_model_len
+    )
+    if (share_inputs["recover_lens"].item() > 0):
+        recover_block(
+            share_inputs["recover_block_list"],
+            share_inputs["recover_lens"],
+            share_inputs["stop_flags"],
+            share_inputs["seq_lens_this_time"],
+            share_inputs["ori_seq_lens_encoder"],
+            share_inputs["seq_lens_encoder"],
+            share_inputs["block_tables"],
+            share_inputs["free_list"],
+            share_inputs["free_list_len"],
+            share_inputs["input_ids"],
+            share_inputs["pre_ids"],
+            share_inputs["step_idx"],
+            share_inputs["encoder_block_lens"],
+            share_inputs["used_list_len"],
+            share_inputs["next_tokens"],
+            share_inputs["first_token_ids"]
+        )
 
 class HPUModelRunner(ModelRunnerBase):
     """ """
