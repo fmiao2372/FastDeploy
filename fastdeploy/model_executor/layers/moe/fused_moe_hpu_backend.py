@@ -16,15 +16,9 @@
 
 import paddle
 from paddle import nn
-from paddle.nn.quant import weight_quantize
-from paddleformers.utils.log import logger
 
-import fastdeploy
 from fastdeploy.distributed.communication_op import \
     tensor_model_parallel_all_reduce
-from fastdeploy.platforms import current_platform
-
-from ..utils import create_and_set_parameter, get_tensor
 from .fused_moe_backend_base import MoEMethodBase
 
 from fastdeploy.model_executor.ops.intel_hpu import mixture_of_experts
@@ -41,19 +35,6 @@ class HpuMoEMethod(MoEMethodBase):
         """
         # bf16
         ffn1_weights, ffn2_weights = layer.extract_moe_ffn_weights(state_dict)
-        # stacked_ffn1_weights = paddle.stack(ffn1_weights, axis=0)
-        # stacked_ffn2_weights = paddle.stack(ffn2_weights, axis=0)
-        # for idx, weight_tensor in enumerate(
-        #     [stacked_ffn1_weights, stacked_ffn2_weights]):
-        #     weight_name = self.added_weight_attrs[idx]
-        #     setattr(
-        #         layer, weight_name,
-        #         layer.create_parameter(
-        #             shape=weight_tensor.shape,
-        #             dtype=weight_tensor.dtype,
-        #             default_initializer=paddle.nn.initializer.Constant(0),
-        #         ))
-        #     getattr(layer, weight_name).set_value(weight_tensor)
 
         for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
             weights_name = self.added_weight_attrs[idx]
@@ -68,6 +49,30 @@ class HpuMoEMethod(MoEMethodBase):
                 weight.set_value(weight_tensor)
                 weights_list.append(weight)
             setattr(layer, weights_name, weights_list)
+
+    def apply_ep_prefill(
+        self,
+        layer: nn.Layer,
+        x: paddle.Tensor,
+        gate_out: paddle.Tensor,
+    ) -> paddle.Tensor:
+        """
+        Apply the EP prefill method.
+        """
+        raise NotImplementedError
+
+
+    def apply_ep_decode(
+        self,
+        layer: nn.Layer,
+        x: paddle.Tensor,
+        gate_out: paddle.Tensor,
+    ) -> paddle.Tensor:
+        """
+        Apply the EP decoder method.
+        """
+        raise NotImplementedError
+
 
     def apply_tp(
         self,
@@ -110,7 +115,7 @@ class HpuMoEMethod(MoEMethodBase):
                 False,  #permuted_weights
                 "silu", #activation,
                 slice_experts_min,
-                slice_experts_max,
+                slice_experts_max - 1,
             )
             up_gate_weights = layer.moe_ffn1_weight
             down_weights = layer.moe_ffn2_weight
