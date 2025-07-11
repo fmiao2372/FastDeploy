@@ -35,7 +35,7 @@ from fastdeploy.model_executor.layers.normalization import LayerNorm, RMSNorm
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 
 from fastdeploy.model_executor.ops.intel_hpu import \
-            fused_rms_mlp_res, rebuild_padding_v2
+            fused_mlp, rebuild_padding_v2
 
 from .model_base import ModelForCasualLM
 
@@ -50,53 +50,40 @@ class Ernie45TMLP_HPU(nn.Layer):
     def __init__(
         self,
         fd_config: FDConfig,
+        intermediate_size: int,
         prefix: str = "",
     ) -> None:
         super().__init__()
 
-        from fastdeploy.model_executor.layers.normalization import RMSNorm
-        self.post_attention_layernorm = RMSNorm(
-            fd_config,
-            hidden_size=fd_config.model_config.hidden_size,
-            eps=1e-5,
-            prefix=f"{prefix}.post_attention_layernorm",
-        )
+        self.nranks = fd_config.parallel_config.tensor_parallel_degree
 
         self.gate_up_proj = MergedColumnParallelLinear(
             fd_config=fd_config,
-            prefix=f"{prefix}.mlp.up_gate_proj",
+            prefix=f"{prefix}.up_gate_proj",
             input_size=fd_config.model_config.hidden_size,
-            output_size=fd_config.model_config.ffn_hidden_size * 2,
+            output_size=intermediate_size * 2,
             with_bias=False,
             activation=fd_config.model_config.hidden_act,
         )
 
-        self.nranks = fd_config.parallel_config.tensor_parallel_degree
         self.down_proj = RowParallelLinear(
             fd_config=fd_config,
-            prefix=f"{prefix}.mlp.down_proj",
-            input_size=(fd_config.model_config.ffn_hidden_size //
-                        self.nranks),
+            prefix=f"{prefix}.down_proj",
+            input_size=intermediate_size,
             output_size=fd_config.model_config.hidden_size,
             with_bias=False,
         )
-        
+
     def load_state_dict(self, state_dict):
-        self.post_attention_layernorm.load_state_dict(state_dict)
         self.gate_up_proj.load_state_dict(state_dict)
         self.down_proj.load_state_dict(state_dict)
         
-    def forward(self, 
-                hidden_states: paddle.Tensor,
-                residual: paddle.Tensor = None,
-    ):
-        out = fused_rms_mlp_res(
+    def forward(self, hidden_states: paddle.Tensor):
+        out = fused_mlp(
             hidden_states,
-            self.post_attention_layernorm.ln_weight,
             self.gate_up_proj.linear_weight,
+            None,
             self.down_proj.linear_weight,
-            residual,
-            epsilon=1e-5,
         )
 
         # all_reduce
@@ -105,7 +92,7 @@ class Ernie45TMLP_HPU(nn.Layer):
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(out)
 
-        return out, residual
+        return out
     
 
 class Ernie45TAttention_HPU(nn.Layer):
@@ -139,6 +126,123 @@ class Ernie45TAttention_HPU(nn.Layer):
 
         return attn_out, residual
 
+class Ernie4_5_MoE(nn.Layer):
+
+    def __init__(self, fd_config: FDConfig, layer_id: int,
+                 prefix: str) -> None:
+        super().__init__()
+        moe_quant_type = ""
+        if hasattr(fd_config.quant_config, 'moe_quant_type'):
+            moe_quant_type = fd_config.quant_config.moe_quant_type
+
+        if moe_quant_type == "w4a8":
+            weight_key_map = {
+                "gate_weight_key":
+                f"{prefix}.gate.weight",
+                "gate_correction_bias_key":
+                f"{prefix}.moe_statics.e_score_correction_bias",
+                "ffn1_expert_weight_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.quant_weight",
+                "ffn2_expert_weight_key":
+                f"{prefix}.experts.{{}}.down_proj.quant_weight",
+                "ffn1_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.weight_scale",
+                "ffn2_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.weight_scale",
+                "ffn1_expert_in_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.activation_scale",
+                "ffn2_expert_in_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.activation_scale",
+            }
+        elif moe_quant_type == "w4w2":
+            weight_key_map = {
+                "gate_weight_key":
+                f"{prefix}.gate.weight",
+                "gate_correction_bias_key":
+                f"{prefix}.moe_statics.e_score_correction_bias",
+                "ffn1_expert_weight_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.quant_weight",
+                "ffn2_expert_weight_key":
+                f"{prefix}.experts.{{}}.down_proj.quant_weight",
+                "ffn1_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.weight_scale",
+                "ffn2_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.weight_scale",
+                "ffn1_expert_super_scales_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.super_scales",
+                "ffn2_expert_super_scales_key":
+                f"{prefix}.experts.{{}}.down_proj.super_scales",
+                "ffn1_expert_code_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.code_scale",
+                "ffn2_expert_code_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.code_scale",
+                "ffn1_expert_code_zp_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.code_zp",
+                "ffn2_expert_code_zp_key":
+                f"{prefix}.experts.{{}}.down_proj.code_zp",
+            }
+        elif moe_quant_type == "tensor_wise_fp8" or (
+                moe_quant_type == "block_wise_fp8"
+                and fd_config.model_config.is_quantized):
+            weight_key_map = {
+                "gate_weight_key":
+                f"{prefix}.gate.weight",
+                "gate_correction_bias_key":
+                f"{prefix}.moe_statics.e_score_correction_bias",
+                "ffn1_expert_weight_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.quant_weight",
+                "ffn2_expert_weight_key":
+                f"{prefix}.experts.{{}}.down_proj.quant_weight",
+                "ffn1_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.weight_scale",
+                "ffn2_expert_weight_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.weight_scale",
+                "ffn1_expert_in_scale_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.activation_scale",
+                "ffn2_expert_in_scale_key":
+                f"{prefix}.experts.{{}}.down_proj.activation_scale",
+            }
+        else:
+            weight_key_map = {
+                "gate_weight_key":
+                f"{prefix}.gate.weight",
+                "gate_correction_bias_key":
+                f"{prefix}.moe_statics.e_score_correction_bias",
+                "ffn1_expert_weight_key":
+                f"{prefix}.experts.{{}}.up_gate_proj.weight",
+                "ffn2_expert_weight_key":
+                f"{prefix}.experts.{{}}.down_proj.weight",
+            }
+
+        self.fused_moe = FusedMoE(
+            fd_config=fd_config,
+            moe_intermediate_size=fd_config.moe_config.moe_intermediate_size,
+            num_experts=fd_config.moe_config.num_experts,
+            top_k=fd_config.moe_config.top_k,
+            layer_idx=layer_id,
+            weight_key_map=weight_key_map,
+        )
+
+        self.num_shared_experts = fd_config.moe_config.moe_num_shared_experts
+        if self.num_shared_experts > 0:
+            shared_experts_hidden_dim = self.num_shared_experts * fd_config.moe_config.moe_intermediate_size
+            self.shared_experts = Ernie45TMLP_HPU(
+                fd_config=fd_config,
+                intermediate_size=shared_experts_hidden_dim,
+                prefix=f"{prefix}.shared_experts",
+            )
+
+    def load_state_dict(self, state_dict):
+        self.fused_moe.load_state_dict(state_dict)
+        if self.num_shared_experts > 0:
+            self.shared_experts.load_state_dict(state_dict)
+
+    def forward(self, hidden_states: paddle.Tensor):
+        out = self.fused_moe(hidden_states)
+        if self.num_shared_experts > 0:
+            s_x = self.shared_experts(hidden_states)
+            out = out + s_x
+        return out
 
 class Ernie45TDecoderLayer_HPU(nn.Layer):
 
@@ -158,31 +262,29 @@ class Ernie45TDecoderLayer_HPU(nn.Layer):
 
         if (fd_config.moe_config.num_experts is not None
                 and layer_id >= fd_config.moe_config.moe_layer_start_index):
-            self.mlp = FusedMoE(
+            self.mlp = Ernie4_5_MoE(
                 fd_config=fd_config,
-                moe_intermediate_size=fd_config.moe_config.
-                moe_intermediate_size,
-                num_experts=fd_config.moe_config.num_experts,
-                top_k=fd_config.moe_config.top_k,
-                layer_idx=layer_id,
-                gate_weight_key=f"{prefix}.mlp.gate.weight",
-                gate_correction_bias_key=
-                f"{prefix}.mlp.moe_statics.e_score_correction_bias",
-                ffn1_expert_weight_key=
-                f"{prefix}.mlp.experts.{{}}.up_gate_proj.weight",
-                ffn2_expert_weight_key=
-                f"{prefix}.mlp.experts.{{}}.down_proj.weight",
-                prefix=prefix,
+                layer_id=layer_id,
+                prefix=f"{prefix}.mlp",
             )
         else:
             self.mlp = Ernie45TMLP_HPU(
                 fd_config=fd_config,
-                prefix=f"{prefix}",
+                intermediate_size=fd_config.model_config.ffn_hidden_size,
+                prefix=f"{prefix}.mlp",
             )
+
+        self.post_attention_layernorm = RMSNorm(
+            fd_config,
+            hidden_size=fd_config.model_config.hidden_size,
+            eps=1e-5,
+            prefix=f"{prefix}.post_attention_layernorm",
+        )
 
     def load_state_dict(self, state_dict):
         self.self_attn.load_state_dict(state_dict)
         self.mlp.load_state_dict(state_dict)
+        self.post_attention_layernorm.load_state_dict(state_dict)
 
     def forward(
         self,
@@ -197,8 +299,15 @@ class Ernie45TDecoderLayer_HPU(nn.Layer):
             forward_meta=forward_meta,
         )
 
+        hidden_states = hidden_states + residual
+        residual = hidden_states
+
+        batch, _, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.reshape([-1, hidden_dim])
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = hidden_states.reshape([batch, -1, hidden_dim])
         logger.info(f"start forward layer mlp/moe")
-        hidden_states, residual = self.mlp(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
 
         return hidden_states, residual
 
@@ -228,12 +337,12 @@ class Ernie45TModel_HPU(nn.Layer):
             prefix=(f"{fd_config.model_config.prefix_name}.embed_tokens"),
         )
 
-        self.hidden_layers = [
+        self.hidden_layers = nn.LayerList([
             Ernie45TDecoderLayer_HPU(
                 fd_config=fd_config,
                 prefix=f"{fd_config.model_config.prefix_name}.layers.{i}")
             for i in range(self.num_layers)
-        ]
+        ])
 
         self.norm = RMSNorm(
             fd_config,
