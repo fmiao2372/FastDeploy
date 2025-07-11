@@ -86,7 +86,7 @@ class HpuMoEMethod(MoEMethodBase):
         if layer.topk_method == "noaux_tc":
             raise NotImplementedError
 
-        norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
+        # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
         batch, _, hidden_dim = x.shape
         x = x.reshape([-1, hidden_dim])
@@ -99,6 +99,7 @@ class HpuMoEMethod(MoEMethodBase):
             routing_weights = paddle.index_sample(weights, selected_experts)
         else:
             routing_weights, selected_experts = paddle.topk(weights, layer.top_k, axis=-1)
+        routing_weights /= paddle.sum(routing_weights, axis=-1, keepdim=True)
 
         experts_min = 0
         experts_max = layer.num_experts
@@ -132,9 +133,9 @@ class HpuMoEMethod(MoEMethodBase):
             )
             fused_moe_out += slice_result
 
-        if norm_topk_prob:
-            routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
-            fused_moe_out = fused_moe_out / routing_weights_norm
+        # if norm_topk_prob:
+        #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
+        #     fused_moe_out = fused_moe_out / routing_weights_norm
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)

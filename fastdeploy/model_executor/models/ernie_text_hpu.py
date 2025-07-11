@@ -304,8 +304,7 @@ class Ernie45TDecoderLayer_HPU(nn.Layer):
 
         batch, _, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.reshape([-1, hidden_dim])
-        hidden_states = self.post_attention_layernorm(
-            hidden_states, None)
+        hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = hidden_states.reshape([batch, -1, hidden_dim])
         logger.info(f"start forward layer mlp/moe")
         hidden_states = self.mlp(hidden_states)
@@ -338,12 +337,12 @@ class Ernie45TModel_HPU(nn.Layer):
             prefix=(f"{fd_config.model_config.prefix_name}.embed_tokens"),
         )
 
-        self.hidden_layers = [
+        self.hidden_layers = nn.LayerList([
             Ernie45TDecoderLayer_HPU(
                 fd_config=fd_config,
                 prefix=f"{fd_config.model_config.prefix_name}.layers.{i}")
             for i in range(self.num_layers)
-        ]
+        ])
 
         self.norm = RMSNorm(
             fd_config,
