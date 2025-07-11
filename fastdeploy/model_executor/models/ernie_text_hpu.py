@@ -35,7 +35,7 @@ from fastdeploy.model_executor.layers.normalization import LayerNorm, RMSNorm
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 
 from fastdeploy.model_executor.ops.intel_hpu import \
-            fused_rms_mlp_res, rebuild_padding_v2
+            fused_mlp, rebuild_padding_v2
 
 from .model_base import ModelForCasualLM
 
@@ -52,20 +52,8 @@ class Ernie45TMLP_HPU(nn.Layer):
         fd_config: FDConfig,
         intermediate_size: int,
         prefix: str = "",
-        prefix2: str = "",
-        sharedexp: bool = False,
     ) -> None:
         super().__init__()
-
-        self.sharedexp = sharedexp
-        from fastdeploy.model_executor.layers.normalization import RMSNorm
-        if not sharedexp:
-            self.post_attention_layernorm = RMSNorm(
-                fd_config,
-                hidden_size=fd_config.model_config.hidden_size,
-                eps=1e-5,
-                prefix=f"{prefix2}.post_attention_layernorm",
-            )
 
         self.nranks = fd_config.parallel_config.tensor_parallel_degree
 
@@ -87,22 +75,15 @@ class Ernie45TMLP_HPU(nn.Layer):
         )
 
     def load_state_dict(self, state_dict):
-        if not self.sharedexp:
-            self.post_attention_layernorm.load_state_dict(state_dict)
         self.gate_up_proj.load_state_dict(state_dict)
         self.down_proj.load_state_dict(state_dict)
         
-    def forward(self, 
-                hidden_states: paddle.Tensor,
-                residual: paddle.Tensor = None,
-    ):
-        out = fused_rms_mlp_res(
+    def forward(self, hidden_states: paddle.Tensor):
+        out = fused_mlp(
             hidden_states,
-            self.post_attention_layernorm.ln_weight,
             self.gate_up_proj.linear_weight,
+            None,
             self.down_proj.linear_weight,
-            residual,
-            epsilon=1e-5,
         )
 
         # all_reduce
@@ -111,7 +92,7 @@ class Ernie45TMLP_HPU(nn.Layer):
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(out)
 
-        return out, residual
+        return out
     
 
 class Ernie45TAttention_HPU(nn.Layer):
@@ -249,7 +230,6 @@ class Ernie4_5_MoE(nn.Layer):
                 fd_config=fd_config,
                 intermediate_size=shared_experts_hidden_dim,
                 prefix=f"{prefix}.shared_experts",
-                sharedexp=True,
             )
 
     def load_state_dict(self, state_dict):
@@ -292,12 +272,19 @@ class Ernie45TDecoderLayer_HPU(nn.Layer):
                 fd_config=fd_config,
                 intermediate_size=fd_config.model_config.ffn_hidden_size,
                 prefix=f"{prefix}.mlp",
-                prefix2=f"{prefix}",
             )
+
+        self.post_attention_layernorm = RMSNorm(
+            fd_config,
+            hidden_size=fd_config.model_config.hidden_size,
+            eps=1e-5,
+            prefix=f"{prefix}.post_attention_layernorm",
+        )
 
     def load_state_dict(self, state_dict):
         self.self_attn.load_state_dict(state_dict)
         self.mlp.load_state_dict(state_dict)
+        self.post_attention_layernorm.load_state_dict(state_dict)
 
     def forward(
         self,
@@ -312,8 +299,16 @@ class Ernie45TDecoderLayer_HPU(nn.Layer):
             forward_meta=forward_meta,
         )
 
+        hidden_states = hidden_states + residual
+        residual = hidden_states
+
+        batch, _, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.reshape([-1, hidden_dim])
+        hidden_states = self.post_attention_layernorm(
+            hidden_states, None)
+        hidden_states = hidden_states.reshape([batch, -1, hidden_dim])
         logger.info(f"start forward layer mlp/moe")
-        hidden_states, residual = self.mlp(hidden_states, residual)
+        hidden_states = self.mlp(hidden_states)
 
         return hidden_states, residual
 
