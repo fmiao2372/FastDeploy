@@ -141,11 +141,8 @@ class Attention_HPU(Attention):
     def __init__(self, fd_config: FDConfig,
         layer_id: int,
         with_bias: bool = False,
-        eps=1e-5,
         prefix: str = "",
     ) -> None:
-        self.eps = eps
-        from fastdeploy.model_executor.layers.normalization import RMSNorm
         from fastdeploy.model_executor.layers.linear_hpu import QKVParallelLinear, RowParallelLinear
         super().__init__(
             fd_config=fd_config,
@@ -156,25 +153,17 @@ class Attention_HPU(Attention):
 
         nranks = fd_config.parallel_config.tensor_parallel_degree
 
-        # Key: ernie.layers.<layer_id>.input_layernorm.weight
-        self.input_layernorm = RMSNorm(
-            fd_config,
-            hidden_size=fd_config.model_config.hidden_size,
-            eps=self.eps,
-            prefix=f"{prefix}.input_layernorm",
-        )
-
         # ernie.layers.<layer_id>.self_attn.qkv_proj.weight
         self.qkv_proj = QKVParallelLinear(
             fd_config=fd_config,
-            prefix=f"{prefix}.self_attn.qkv_proj",
+            prefix=f"{prefix}.qkv_proj",
             with_bias=with_bias,
         )
 
         # ernie.layers.<layer_id>.self_attn.o_proj.weight
         self.o_proj = RowParallelLinear(
             fd_config=fd_config,
-            prefix=f"{prefix}.self_attn.o_proj",
+            prefix=f"{prefix}.o_proj",
             input_size=(fd_config.model_config.hidden_size // nranks),
             output_size=fd_config.model_config.hidden_size,
         )
@@ -183,7 +172,6 @@ class Attention_HPU(Attention):
         '''
         HPU attention includes qkv_proj and o_proj.
         '''
-        self.input_layernorm.load_state_dict(state_dict)
         self.qkv_proj.load_state_dict(state_dict)
         # self.qkv_proj.linear_weight.set_value(self.qkv_proj.linear_weight.transpose([0, 1]))
         self.o_proj.load_state_dict(state_dict)
@@ -191,7 +179,6 @@ class Attention_HPU(Attention):
     def forward(
         self,
         src: paddle.Tensor = None,
-        residual_input: paddle.Tensor = None,
         forward_meta: ForwardMeta_HPU = None,
     ):
         """
@@ -203,7 +190,6 @@ class Attention_HPU(Attention):
         """
         return forward_meta.attn_backend.forward(
             src,
-            residual_input,
             self,
             forward_meta,
         )

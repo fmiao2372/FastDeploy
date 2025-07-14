@@ -150,7 +150,6 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -165,21 +164,18 @@ class AttentionBackend_HPU(AttentionBackend):
         if forward_meta.forward_mode.is_mixed():
             return self.forward_mixed(
                 src,
-                residual,
                 layer,
                 forward_meta,
             )
         elif forward_meta.forward_mode.is_decode():
             return self.forward_decode(
                 src,
-                residual,
                 layer,
                 forward_meta,
             )
         else:
             return self.forward_extend(
                 src,
-                residual,
                 layer,
                 forward_meta,
             )
@@ -187,7 +183,6 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_mixed(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -197,7 +192,6 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_decode(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -207,7 +201,6 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_extend(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):

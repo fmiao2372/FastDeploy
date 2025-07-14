@@ -39,7 +39,8 @@ from fastdeploy.model_executor.model_loader import get_model_from_loader
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
-from fastdeploy.model_executor.ops.intel_hpu import (save_output, step_paddle, update_inputs_v2)
+from fastdeploy.model_executor.ops.intel_hpu import (
+    save_output, step_paddle, rebuild_padding_v2, update_inputs_v2)
 
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
                  model_output: ModelOutputData) -> None:
@@ -654,6 +655,7 @@ class HPUModelRunner(ModelRunnerBase):
             block_mapping,
             attention_mask,
             batch_ids,
+            total_batch,
             is_prompt,
         ) = prepare_block_metadata(
             self.share_inputs["input_ids"],
@@ -678,6 +680,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["block_bias"] = attention_mask
         self.share_inputs["block_size"] = self.parallel_config.block_size
         self.share_inputs["batch_ids"] = batch_ids
+        self.share_inputs["total_batch"] = total_batch.item()
         self.share_inputs["is_prompt"] = is_prompt
         self.initialize_forward_meta()
 
@@ -1053,6 +1056,13 @@ class HPUModelRunner(ModelRunnerBase):
         # # 3. Execute model
         hiddden_states = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
+
+        hiddden_states = rebuild_padding_v2(
+            hiddden_states,
+            self.forward_meta.batch_ids,
+            self.forward_meta.seq_lens_encoder,
+            self.forward_meta.is_prompt,
+        )
 
         # # 4. Compute logits, Sample
         logits = self.model.compute_logits(hiddden_states)

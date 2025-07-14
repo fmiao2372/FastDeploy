@@ -136,7 +136,6 @@ class BlockAttentionBackend(AttentionBackend_HPU):
     def forward_extend(
         self,
         src,
-        residual_input,
         layer: Attention_HPU,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -145,16 +144,16 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         """
         metadata = self.attention_metadata
 
-        query_states, key_value_states = paddlenlp_ops.fused_rms_qkv_rope_t(
+        print(f"forward_meta.total_batch = {forward_meta.total_batch}")
+
+        query_states, key_value_states = paddlenlp_ops.fused_qkv_rope(
             src,
-            layer.input_layernorm.ln_weight,
             layer.qkv_proj.linear_weight,
             layer.qkv_proj.linear_bias,
             forward_meta.rotary_embs,
-            residual_input,
-            layer.eps,
             self.head_dim,
             self.num_heads,
+            forward_meta.total_batch,
         )
 
         kv, B, BP_BS, M, H = key_value_states.shape
@@ -181,12 +180,11 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(out_linear_out)
 
-        return out_linear_out, residual_input
+        return out_linear_out
 
     def forward_decode(
         self,
         src,
-        residual_input,
         layer: Attention_HPU,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -196,7 +194,6 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         # metadata = self.attention_metadata
         res = paddlenlp_ops.fused_block_attention(
                     src,
-                    residual_input,
                     forward_meta.rotary_embs,
                     forward_meta.caches[2 * layer.layer_id],
                     forward_meta.caches[2 * layer.layer_id + 1],
@@ -206,11 +203,9 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                     forward_meta.attention_mask,
                     forward_meta.block_indices,
                     forward_meta.block_offsets,
-                    layer.input_layernorm.ln_weight,
                     layer.qkv_proj.linear_weight,
                     layer.qkv_proj.linear_bias,
                     layer.o_proj.linear_weight,
-                    layer.eps,
                     self.head_dim,
                     self.num_heads,
                     scaling_factor=self.head_dim**-0.5,
@@ -221,4 +216,4 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             from fastdeploy.distributed.communication_op import \
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(res)
-        return res, residual_input
+        return res
