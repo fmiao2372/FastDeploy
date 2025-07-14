@@ -108,18 +108,27 @@ class Qwen2Attention_HPU(nn.Layer):
                  prefix: str = "") -> None:
         super().__init__()
 
+        self.qkv_proj = QKVParallelLinear(fd_config=fd_config,
+                                          prefix=f"{prefix}.qkv_proj",
+                                          with_bias=True)
 
-        self.attn = Attention_HPU(
+        self.o_proj = RowParallelLinear(
             fd_config=fd_config,
-            layer_id=layer_id,
-            with_bias=True,
-            prefix=prefix,
+            prefix=f"{prefix}.o_proj",
+            input_size=fd_config.model_config.hidden_size,
+            output_size=fd_config.model_config.hidden_size,
         )
+
+        self.attn = Attention_HPU(fd_config=fd_config,
+                              layer_id=layer_id,
+                              prefix=prefix,
+                              use_neox_rotary_style=True)
 
     def load_state_dict(self, state_dict):
         """
         """
-        self.attn.load_state_dict(state_dict)
+        self.qkv_proj.load_state_dict(state_dict)
+        self.o_proj.load_state_dict(state_dict)
 
     def forward(
         self,
@@ -130,164 +139,10 @@ class Qwen2Attention_HPU(nn.Layer):
         """
         atten_out = self.attn(
             src=hidden_states,
+            qkv_proj = self.qkv_proj,
+            o_proj = self.o_proj,
             forward_meta=forward_meta,
         )
 
         return atten_out
-
-
-class Qwen2DecoderLayer_HPU(nn.Layer):
-    """
-    """
-
-    def __init__(
-        self,
-        fd_config: FDConfig,
-        prefix: str = "",
-    ) -> None:
-        super().__init__()
-        layer_id = int(prefix.split(sep='.')[-1])
-
-        self.self_attn = Qwen2Attention_HPU(
-            fd_config=fd_config,
-            layer_id=layer_id,
-            prefix=f"{prefix}.self_attn",
-        )
-
-        self.mlp = Qwen2MLP_HPU(
-            fd_config=fd_config,
-            prefix=f"{prefix}.mlp",
-        )
-
-        self.input_layernorm = RMSNorm(
-            fd_config,
-            hidden_size=fd_config.model_config.hidden_size,
-            eps=1e-6,
-            prefix=f"{prefix}.input_layernorm",
-        )
-
-        self.post_attention_layernorm = RMSNorm(
-            fd_config,
-            hidden_size=fd_config.model_config.hidden_size,
-            eps=1e-6,
-            prefix=f"{prefix}.post_attention_layernorm",
-        )
-
-    def load_state_dict(self, state_dict):
-        """
-        """
-        self.self_attn.load_state_dict(state_dict)
-        self.mlp.load_state_dict(state_dict)
-        self.input_layernorm.load_state_dict(state_dict)
-        self.post_attention_layernorm.load_state_dict(state_dict)
-
-    def forward(
-        self,
-        forward_meta: ForwardMeta_HPU,
-        hidden_states: paddle.Tensor,
-        residual: paddle.Tensor = None,
-    ):
-        """
-        """
-        # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-
-        hidden_states = self.self_attn(
-            hidden_states=hidden_states,
-            forward_meta=forward_meta,
-        )
-
-        # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
-
-        hidden_states = self.mlp(hidden_states)
-
-        return hidden_states, residual
-
-
-# @support_graph_optimization
-class Qwen2Model_HPU(nn.Layer):
-    """
-    """
-
-    def __init__(
-        self,
-        fd_config: FDConfig = None,
-    ):
-        """
-        Initializer for the Qwen2Model class.
-
-        Args:
-
-        """
-        super().__init__()
-
-        self.num_layers = fd_config.model_config.num_layers
-        fd_config.model_config.prefix_name = "qwen2"
-
-        self.embeddings = VocabParallelEmbedding(
-            fd_config=fd_config,
-            num_embeddings=fd_config.model_config.vocab_size,
-            embedding_dim=fd_config.model_config.hidden_size,
-            params_dtype=paddle.get_default_dtype,
-            prefix=(f"{fd_config.model_config.prefix_name}.embed_tokens"),
-        )
-
-        self.layers = nn.LayerList([
-            Qwen2DecoderLayer_HPU(
-                fd_config=fd_config,
-                prefix=f"{fd_config.model_config.prefix_name}.layers.{i}")
-            for i in range(self.num_layers)
-        ])
-
-        self.norm = RMSNorm(
-            fd_config,
-            hidden_size=fd_config.model_config.hidden_size,
-            eps=1e-5,
-            prefix=f"{fd_config.model_config.prefix_name}.norm",
-        )
-
-    def load_state_dict(self, state_dict):
-        """
-        Load model parameters from a given state dictionary.
-
-        Args:
-            state_dict (dict[str, np.ndarray | paddle.Tensor]):
-                A dictionary containing model parameters, where keys are parameter names
-                and values are NumPy arrays or PaddlePaddle tensors.
-        """
-        self.embeddings.load_state_dict(state_dict)
-        self.norm.load_state_dict(state_dict)
-        for i in range(self.num_layers):
-            logger.info(f"Start load layer {i}")
-            self.layers[i].load_state_dict(state_dict)
-
-    def forward(
-        self,
-        ids_remove_padding: paddle.Tensor,
-        forward_meta: ForwardMeta_HPU,
-    ):
-        """
-        """
-
-        hidden_states = self.embeddings(ids_remove_padding=ids_remove_padding)
-
-        residual = None
-
-        for i in range(self.num_layers):
-            hidden_states, residual = self.layers[i](forward_meta,
-                                                     hidden_states, residual)
-
-        hidden_states = hidden_states + residual
-
-        out = self.norm(hidden_states)
-
-        return out
-
 

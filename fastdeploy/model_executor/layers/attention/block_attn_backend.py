@@ -30,6 +30,8 @@ from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.layers.attention.attention import Attention_HPU
 from fastdeploy.model_executor.layers.attention.base_attention_backend import (
     AttentionBackend_HPU, AttentionMetadata)
+from fastdeploy.model_executor.layers.linear_hpu import (
+    QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 
 @dataclass
@@ -136,6 +138,8 @@ class BlockAttentionBackend(AttentionBackend_HPU):
     def forward_extend(
         self,
         src,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: Attention_HPU,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -148,8 +152,8 @@ class BlockAttentionBackend(AttentionBackend_HPU):
 
         query_states, key_value_states = paddlenlp_ops.fused_qkv_rope(
             src,
-            layer.qkv_proj.linear_weight,
-            layer.qkv_proj.linear_bias,
+            qkv_proj.linear_weight,
+            qkv_proj.linear_bias,
             forward_meta.rotary_embs,
             self.head_dim,
             self.num_heads,
@@ -170,7 +174,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             key_value_states,
             forward_meta.attn_mask,
             None,
-            layer.o_proj.linear_weight,
+            o_proj.linear_weight,
             scaling_factor=self.head_dim**-0.5,
             causal=True,
         )
@@ -185,6 +189,8 @@ class BlockAttentionBackend(AttentionBackend_HPU):
     def forward_decode(
         self,
         src,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: Attention_HPU,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -203,9 +209,9 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                     forward_meta.attention_mask,
                     forward_meta.block_indices,
                     forward_meta.block_offsets,
-                    layer.qkv_proj.linear_weight,
-                    layer.qkv_proj.linear_bias,
-                    layer.o_proj.linear_weight,
+                    qkv_proj.linear_weight,
+                    qkv_proj.linear_bias,
+                    o_proj.linear_weight,
                     self.head_dim,
                     self.num_heads,
                     scaling_factor=self.head_dim**-0.5,

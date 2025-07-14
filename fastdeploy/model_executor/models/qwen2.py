@@ -148,16 +148,29 @@ class Qwen2DecoderLayer(nn.Layer):
         super().__init__()
         layer_id = int(prefix.split(sep='.')[-1])
 
-        self.self_attn = Qwen2Attention(
-            fd_config=fd_config,
-            layer_id=layer_id,
-            prefix=f"{prefix}.self_attn",
-        )
-
-        self.mlp = Qwen2MLP(
-            fd_config=fd_config,
-            prefix=f"{prefix}.mlp",
-        )
+        if current_platform.is_intel_hpu():
+            from fastdeploy.model_executor.models.qwen2_hpu import Qwen2Attention_HPU, Qwen2MLP_HPU
+            self.self_attn = Qwen2Attention_HPU(
+                fd_config=fd_config,
+                layer_id=layer_id,
+                prefix=f"{prefix}.self_attn",
+            )
+    
+            self.mlp = Qwen2MLP_HPU(
+                fd_config=fd_config,
+                prefix=f"{prefix}.mlp",
+            )
+        else:
+            self.self_attn = Qwen2Attention(
+                fd_config=fd_config,
+                layer_id=layer_id,
+                prefix=f"{prefix}.self_attn",
+            )
+    
+            self.mlp = Qwen2MLP(
+                fd_config=fd_config,
+                prefix=f"{prefix}.mlp",
+            )
 
         self.input_layernorm = RMSNorm(
             fd_config,
@@ -303,11 +316,7 @@ class Qwen2ForCausalLM(ModelForCasualLM):
         """
         super(Qwen2ForCausalLM, self).__init__(fd_config)
 
-        if current_platform.is_intel_hpu():
-            from fastdeploy.model_executor.models.qwen2_hpu import Qwen2Model_HPU
-            self.model = Qwen2Model_HPU(fd_config=fd_config)
-        else:
-            self.model = Qwen2Model(fd_config=fd_config)
+        self.model = Qwen2Model(fd_config=fd_config)
 
         self.ori_vocab_size = fd_config.model_config.ori_vocab_size
 

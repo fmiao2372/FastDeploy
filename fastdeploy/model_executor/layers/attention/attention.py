@@ -24,6 +24,8 @@ from paddleformers.utils.log import logger
 from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.layers.quantization.quant_base import \
     QuantMethodBase
+from fastdeploy.model_executor.layers.linear_hpu import (
+    QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta, ForwardMeta_HPU
 
 
@@ -138,47 +140,11 @@ class Attention(nn.Layer):
 
 
 class Attention_HPU(Attention):
-    def __init__(self, fd_config: FDConfig,
-        layer_id: int,
-        with_bias: bool = False,
-        prefix: str = "",
-    ) -> None:
-        from fastdeploy.model_executor.layers.linear_hpu import QKVParallelLinear, RowParallelLinear
-        super().__init__(
-            fd_config=fd_config,
-            layer_id=layer_id,
-            prefix=prefix,
-            use_neox_rotary_style=False,
-        )
-
-        nranks = fd_config.parallel_config.tensor_parallel_degree
-
-        # ernie.layers.<layer_id>.self_attn.qkv_proj.weight
-        self.qkv_proj = QKVParallelLinear(
-            fd_config=fd_config,
-            prefix=f"{prefix}.qkv_proj",
-            with_bias=with_bias,
-        )
-
-        # ernie.layers.<layer_id>.self_attn.o_proj.weight
-        self.o_proj = RowParallelLinear(
-            fd_config=fd_config,
-            prefix=f"{prefix}.o_proj",
-            input_size=(fd_config.model_config.hidden_size // nranks),
-            output_size=fd_config.model_config.hidden_size,
-        )
-
-    def load_state_dict(self, state_dict):
-        '''
-        HPU attention includes qkv_proj and o_proj.
-        '''
-        self.qkv_proj.load_state_dict(state_dict)
-        # self.qkv_proj.linear_weight.set_value(self.qkv_proj.linear_weight.transpose([0, 1]))
-        self.o_proj.load_state_dict(state_dict)
-
     def forward(
         self,
         src: paddle.Tensor = None,
+        qkv_proj: QKVParallelLinear = None,
+        o_proj: RowParallelLinear = None,
         forward_meta: ForwardMeta_HPU = None,
     ):
         """
@@ -190,6 +156,8 @@ class Attention_HPU(Attention):
         """
         return forward_meta.attn_backend.forward(
             src,
+            qkv_proj,
+            o_proj,
             self,
             forward_meta,
         )
