@@ -138,26 +138,3 @@ class Attention(nn.Layer):
             forward_meta,
         )
 
-
-class Attention_HPU(Attention):
-    def forward(
-        self,
-        src: paddle.Tensor = None,
-        qkv_proj: QKVParallelLinear = None,
-        o_proj: RowParallelLinear = None,
-        forward_meta: ForwardMeta_HPU = None,
-    ):
-        """
-        The forward function of attention layer.
-        args:
-            src: the hidden states tensor
-            residual_input: the residual tensor
-            forward_meta: the forward meta data
-        """
-        return forward_meta.attn_backend.forward(
-            src,
-            qkv_proj,
-            o_proj,
-            self,
-            forward_meta,
-        )

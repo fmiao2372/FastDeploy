@@ -153,6 +153,90 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["first_token_ids"]
         )
 
+from fastdeploy.model_executor.layers.linear_hpu import (
+    QKVParallelLinear, RowParallelLinear)
+from fastdeploy.model_executor.ops.intel_hpu import fused_mlp
+from fastdeploy.worker.forward_meta import ForwardMeta_HPU
+
+def fused_attention_forward(
+    self,
+    src: paddle.Tensor = None,
+    qkv_proj: QKVParallelLinear = None,
+    o_proj: RowParallelLinear = None,
+    forward_meta: ForwardMeta_HPU = None,
+):
+    """
+    The forward function of attention layer.
+    args:
+        src: the hidden states tensor
+        residual_input: the residual tensor
+        forward_meta: the forward meta data
+    """
+    return forward_meta.attn_backend.forward(
+        src,
+        qkv_proj,
+        o_proj,
+        self,
+        forward_meta,
+    )
+
+def fused_self_atten_forward(
+    self,
+    forward_meta: ForwardMeta_HPU,
+    hidden_states: paddle.Tensor,
+):
+    """
+    """
+    atten_out = self.attn(
+        src=hidden_states,
+        qkv_proj = self.qkv_proj,
+        o_proj = self.o_proj,
+        forward_meta=forward_meta,
+    )
+
+    return atten_out
+
+
+def fused_mlp_forward(self, x):
+    """
+    """
+    out = fused_mlp(
+        x,
+        self.gate_up_proj.linear_weight,
+        None,
+        self.down_proj.linear_weight,
+    )
+
+    # all_reduce
+    if self.nranks > 1:
+        from fastdeploy.distributed.communication_op import \
+            tensor_model_parallel_all_reduce
+        tensor_model_parallel_all_reduce(out)
+
+    return out
+    
+from fastdeploy.model_executor.layers.attention.attention import Attention
+from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
+import types
+def convert_model(model):
+    """
+    """
+    for name, module in model.named_children():
+        if len(list(module.named_children())) > 0:
+            # print(f"********** model {model.__class__.__name__} has submodule: name={name}, module={module.__class__.__name__}")
+            if isinstance(module, Qwen2Attention):
+                module.forward = types.MethodType(fused_self_atten_forward, module)
+            if isinstance(module, Qwen2MLP):
+                module.forward = types.MethodType(fused_mlp_forward, module)
+            convert_model(module)
+        else:
+            # print(f"*********[ Leaf node]  Loading submodule: name={name} -- module: {module.__class__.__name__}")
+            if isinstance(module, Attention):
+                module.forward = types.MethodType(fused_attention_forward, module)
+    
+    return model
+
+
 class HPUModelRunner(ModelRunnerBase):
     """ """
 
@@ -718,6 +802,9 @@ class HPUModelRunner(ModelRunnerBase):
         # 2. Load lora model
 
         # 3. Load drafter model(for speculative decoding)
+
+        # 4. Convert model to HPU format
+        self.model = convert_model(self.model)
 
         time_after_load = time.perf_counter()
         logger.info(

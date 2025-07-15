@@ -29,7 +29,7 @@ from fastdeploy.config import FDConfig, ModelConfig
 from fastdeploy.model_executor.layers.activation import SiluAndMul
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
-from fastdeploy.model_executor.layers.linear import (
+from fastdeploy.model_executor.layers.linear_hpu import (
     MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear)
 from fastdeploy.model_executor.layers.lm_head import ParallelLMHead
 from fastdeploy.model_executor.layers.normalization import RMSNorm
@@ -148,29 +148,15 @@ class Qwen2DecoderLayer(nn.Layer):
         super().__init__()
         layer_id = int(prefix.split(sep='.')[-1])
 
-        if current_platform.is_intel_hpu():
-            from fastdeploy.model_executor.models.qwen2_hpu import Qwen2Attention_HPU, Qwen2MLP_HPU
-            self.self_attn = Qwen2Attention_HPU(
-                fd_config=fd_config,
-                layer_id=layer_id,
-                prefix=f"{prefix}.self_attn",
-            )
-    
-            self.mlp = Qwen2MLP_HPU(
-                fd_config=fd_config,
-                prefix=f"{prefix}.mlp",
-            )
-        else:
-            self.self_attn = Qwen2Attention(
-                fd_config=fd_config,
-                layer_id=layer_id,
-                prefix=f"{prefix}.self_attn",
-            )
-    
-            self.mlp = Qwen2MLP(
-                fd_config=fd_config,
-                prefix=f"{prefix}.mlp",
-            )
+        self.self_attn = Qwen2Attention(
+            fd_config=fd_config,
+            layer_id=layer_id,
+            prefix=f"{prefix}.self_attn",
+        )
+        self.mlp = Qwen2MLP(
+            fd_config=fd_config,
+            prefix=f"{prefix}.mlp",
+        )
 
         self.input_layernorm = RMSNorm(
             fd_config,

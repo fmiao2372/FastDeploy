@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from paddle._typing.dtype_like import _DTypeLiteral
 
 from fastdeploy.config import FDConfig
-from fastdeploy.model_executor.layers.attention.attention import Attention_HPU
+from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.attention.base_attention_backend import (
     AttentionBackend_HPU, AttentionMetadata)
 from fastdeploy.model_executor.layers.linear_hpu import (
@@ -140,15 +140,13 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         src,
         qkv_proj: QKVParallelLinear,
         o_proj: RowParallelLinear,
-        layer: Attention_HPU,
+        layer: Attention,
         forward_meta: ForwardMeta_HPU,
     ):
         """
         forward_extend
         """
         metadata = self.attention_metadata
-
-        print(f"forward_meta.total_batch = {forward_meta.total_batch}")
 
         query_states, key_value_states = paddlenlp_ops.fused_qkv_rope(
             src,
@@ -191,7 +189,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         src,
         qkv_proj: QKVParallelLinear,
         o_proj: RowParallelLinear,
-        layer: Attention_HPU,
+        layer: Attention,
         forward_meta: ForwardMeta_HPU,
     ):
         """
