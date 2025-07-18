@@ -88,10 +88,6 @@ class HpuMoEMethod(MoEMethodBase):
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
-        batch, _, hidden_dim = x.shape
-        x = x.reshape([-1, hidden_dim])
-        gate_out = gate_out.reshape([-1, gate_out.shape[-1]])
-
         weights = paddle.nn.functional.softmax(gate_out, axis=-1)
         if layer.moe_use_gate_correction_bias:
             scores = weights + layer.gate_correction_bias
@@ -140,5 +136,4 @@ class HpuMoEMethod(MoEMethodBase):
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)
 
-        fused_moe_out = fused_moe_out.reshape([batch, -1, hidden_dim])
         return fused_moe_out
