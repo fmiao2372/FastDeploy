@@ -24,7 +24,7 @@ from paddleformers.utils.log import logger
 from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.layers.quantization.quant_base import \
     QuantMethodBase
-from fastdeploy.model_executor.layers.linear_hpu import (
+from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta, ForwardMeta_HPU
 

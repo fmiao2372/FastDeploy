@@ -30,7 +30,7 @@ from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.attention.base_attention_backend import (
     AttentionBackend_HPU, AttentionMetadata)
-from fastdeploy.model_executor.layers.linear_hpu import (
+from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 
@@ -156,6 +156,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             self.head_dim,
             self.num_heads,
             forward_meta.total_batch,
+            transpose=False,
         )
 
         kv, B, BP_BS, M, H = key_value_states.shape
@@ -213,6 +214,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                     self.head_dim,
                     self.num_heads,
                     scaling_factor=self.head_dim**-0.5,
+                    transpose=False,
                 )
 
         # all_reduce

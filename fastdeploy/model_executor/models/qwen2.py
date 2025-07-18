@@ -29,7 +29,7 @@ from fastdeploy.config import FDConfig, ModelConfig
 from fastdeploy.model_executor.layers.activation import SiluAndMul
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
-from fastdeploy.model_executor.layers.linear_hpu import (
+from fastdeploy.model_executor.layers.linear import (
     MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear)
 from fastdeploy.model_executor.layers.lm_head import ParallelLMHead
 from fastdeploy.model_executor.layers.normalization import RMSNorm

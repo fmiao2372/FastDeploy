@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import paddle
 
-from fastdeploy.model_executor.layers.linear_hpu import (
+from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta, ForwardMeta_HPU
 

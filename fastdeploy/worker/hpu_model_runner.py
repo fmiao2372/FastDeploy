@@ -153,7 +153,7 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["first_token_ids"]
         )
 
-from fastdeploy.model_executor.layers.linear_hpu import (
+from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
 from fastdeploy.model_executor.ops.intel_hpu import fused_mlp
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
@@ -217,6 +217,7 @@ def fused_mlp_forward(self, x):
     
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
+from fastdeploy.model_executor.models.ernie4_5_moe import Ernie4_5_Attention, Ernie4_5_MLP
 import types
 def convert_model(model):
     """
@@ -224,8 +225,12 @@ def convert_model(model):
     for name, module in model.named_children():
         if len(list(module.named_children())) > 0:
             # print(f"********** model {model.__class__.__name__} has submodule: name={name}, module={module.__class__.__name__}")
+            if isinstance(module, Ernie4_5_Attention):
+                module.forward = types.MethodType(fused_self_atten_forward, module)
             if isinstance(module, Qwen2Attention):
                 module.forward = types.MethodType(fused_self_atten_forward, module)
+            if isinstance(module, Ernie4_5_MLP):
+                module.forward = types.MethodType(fused_mlp_forward, module)
             if isinstance(module, Qwen2MLP):
                 module.forward = types.MethodType(fused_mlp_forward, module)
             convert_model(module)
