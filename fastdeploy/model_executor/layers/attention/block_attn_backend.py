@@ -157,6 +157,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             self.num_heads,
             forward_meta.total_batch,
             transpose=False,
+            use_neox_style=layer.use_neox_rotary_style,
         )
 
         kv, B, BP_BS, M, H = key_value_states.shape
@@ -215,6 +216,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                     self.num_heads,
                     scaling_factor=self.head_dim**-0.5,
                     transpose=False,
+                    use_neox_style=layer.use_neox_rotary_style,
                 )
 
         # all_reduce

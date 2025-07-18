@@ -1152,6 +1152,7 @@ class HPUModelRunner(ModelRunnerBase):
         hiddden_states = rebuild_padding_v2(
             hiddden_states,
             self.forward_meta.batch_ids,
+            self.forward_meta.total_batch,
             self.forward_meta.seq_lens_encoder,
             self.forward_meta.is_prompt,
         )
