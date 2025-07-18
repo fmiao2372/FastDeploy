@@ -153,6 +153,7 @@ class Qwen2DecoderLayer(nn.Layer):
             layer_id=layer_id,
             prefix=f"{prefix}.self_attn",
         )
+
         self.mlp = Qwen2MLP(
             fd_config=fd_config,
             prefix=f"{prefix}.mlp",
