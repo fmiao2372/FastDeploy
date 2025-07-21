@@ -27,9 +27,11 @@ if TYPE_CHECKING:
     from paddle._typing.dtype_like import _DTypeLiteral
 
 from fastdeploy.config import FDConfig
-from fastdeploy.model_executor.layers.attention.attention import Attention_HPU
+from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.attention.base_attention_backend import (
     AttentionBackend_HPU, AttentionMetadata)
+from fastdeploy.model_executor.layers.linear import (
+    QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 
 @dataclass
@@ -136,8 +138,9 @@ class BlockAttentionBackend(AttentionBackend_HPU):
     def forward_extend(
         self,
         src,
-        residual_input,
-        layer: Attention_HPU,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
+        layer: Attention,
         forward_meta: ForwardMeta_HPU,
     ):
         """
@@ -145,16 +148,16 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         """
         metadata = self.attention_metadata
 
-        query_states, key_value_states = paddlenlp_ops.fused_rms_qkv_rope_t(
+        query_states, key_value_states = paddlenlp_ops.fused_qkv_rope(
             src,
-            layer.input_layernorm.ln_weight,
-            layer.qkv_proj.linear_weight,
-            layer.qkv_proj.linear_bias,
+            qkv_proj.linear_weight,
+            qkv_proj.linear_bias,
             forward_meta.rotary_embs,
-            residual_input,
-            layer.eps,
             self.head_dim,
             self.num_heads,
+            forward_meta.total_batch,
+            transpose=False,
+            use_neox_style=layer.use_neox_rotary_style,
         )
 
         kv, B, BP_BS, M, H = key_value_states.shape
@@ -171,7 +174,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             key_value_states,
             forward_meta.attn_mask,
             None,
-            layer.o_proj.linear_weight,
+            o_proj.linear_weight,
             scaling_factor=self.head_dim**-0.5,
             causal=True,
         )
@@ -181,13 +184,14 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(out_linear_out)
 
-        return out_linear_out, residual_input
+        return out_linear_out
 
     def forward_decode(
         self,
         src,
-        residual_input,
-        layer: Attention_HPU,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
+        layer: Attention,
         forward_meta: ForwardMeta_HPU,
     ):
         """
@@ -196,7 +200,6 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         # metadata = self.attention_metadata
         res = paddlenlp_ops.fused_block_attention(
                     src,
-                    residual_input,
                     forward_meta.rotary_embs,
                     forward_meta.caches[2 * layer.layer_id],
                     forward_meta.caches[2 * layer.layer_id + 1],
@@ -206,14 +209,14 @@ class BlockAttentionBackend(AttentionBackend_HPU):
                     forward_meta.attention_mask,
                     forward_meta.block_indices,
                     forward_meta.block_offsets,
-                    layer.input_layernorm.ln_weight,
-                    layer.qkv_proj.linear_weight,
-                    layer.qkv_proj.linear_bias,
-                    layer.o_proj.linear_weight,
-                    layer.eps,
+                    qkv_proj.linear_weight,
+                    qkv_proj.linear_bias,
+                    o_proj.linear_weight,
                     self.head_dim,
                     self.num_heads,
                     scaling_factor=self.head_dim**-0.5,
+                    transpose=False,
+                    use_neox_style=layer.use_neox_rotary_style,
                 )
 
         # all_reduce
@@ -221,4 +224,4 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             from fastdeploy.distributed.communication_op import \
                 tensor_model_parallel_all_reduce
             tensor_model_parallel_all_reduce(res)
-        return res, residual_input
+        return res

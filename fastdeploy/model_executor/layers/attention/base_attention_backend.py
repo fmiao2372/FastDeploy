@@ -24,6 +24,8 @@ from dataclasses import dataclass
 
 import paddle
 
+from fastdeploy.model_executor.layers.linear import (
+    QKVParallelLinear, RowParallelLinear)
 from fastdeploy.worker.forward_meta import ForwardMeta, ForwardMeta_HPU
 
 
@@ -150,7 +152,8 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -165,21 +168,24 @@ class AttentionBackend_HPU(AttentionBackend):
         if forward_meta.forward_mode.is_mixed():
             return self.forward_mixed(
                 src,
-                residual,
+                qkv_proj,
+                o_proj,
                 layer,
                 forward_meta,
             )
         elif forward_meta.forward_mode.is_decode():
             return self.forward_decode(
                 src,
-                residual,
+                qkv_proj,
+                o_proj,
                 layer,
                 forward_meta,
             )
         else:
             return self.forward_extend(
                 src,
-                residual,
+                qkv_proj,
+                o_proj,
                 layer,
                 forward_meta,
             )
@@ -187,7 +193,8 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_mixed(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -197,7 +204,8 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_decode(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):
@@ -207,7 +215,8 @@ class AttentionBackend_HPU(AttentionBackend):
     def forward_extend(
         self,
         src: paddle.Tensor,
-        residual: paddle.Tensor,
+        qkv_proj: QKVParallelLinear,
+        o_proj: RowParallelLinear,
         layer: paddle.nn.Layer,
         forward_meta: ForwardMeta_HPU,
     ):

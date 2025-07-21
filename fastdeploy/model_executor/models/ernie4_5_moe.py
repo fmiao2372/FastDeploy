@@ -418,11 +418,7 @@ class Ernie4_5_MoeForCausalLM(ModelForCasualLM):
         """
         super(Ernie4_5_MoeForCausalLM, self).__init__(fd_config)
         self.fd_config = fd_config
-        if current_platform.is_intel_hpu():
-            from fastdeploy.model_executor.models.ernie_text_hpu import Ernie45TModel_HPU
-            self.model = Ernie45TModel_HPU(fd_config=fd_config)
-        else:
-            self.model = Ernie4_5_Model(fd_config=fd_config)
+        self.model = Ernie4_5_Model(fd_config=fd_config)
 
         self.ori_vocab_size = fd_config.model_config.ori_vocab_size
 

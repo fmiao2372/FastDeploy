@@ -479,6 +479,9 @@ class ForwardMeta_HPU():
     batch_ids: Optional[paddle.Tensor] = None
 
     #
+    total_batch: Optional[paddle.Tensor] = None
+
+    #
     is_prompt: Optional[paddle.Tensor] = None
 
     #
@@ -519,6 +522,7 @@ class ForwardMeta_HPU():
                   block_mapping = share_inputs["block_mapping"], 
                   attention_mask = share_inputs["block_bias"],
                   block_size = share_inputs["block_size"],
+                  total_batch = share_inputs["total_batch"],
                   batch_ids = share_inputs["batch_ids"],
                   is_prompt = share_inputs["is_prompt"],
                   attn_backend=attn_backend,

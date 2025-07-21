@@ -303,11 +303,7 @@ class Qwen2ForCausalLM(ModelForCasualLM):
         """
         super(Qwen2ForCausalLM, self).__init__(fd_config)
 
-        if current_platform.is_intel_hpu():
-            from fastdeploy.model_executor.models.qwen2_hpu import Qwen2Model_HPU
-            self.model = Qwen2Model_HPU(fd_config=fd_config)
-        else:
-            self.model = Qwen2Model(fd_config=fd_config)
+        self.model = Qwen2Model(fd_config=fd_config)
 
         self.ori_vocab_size = fd_config.model_config.ori_vocab_size
 

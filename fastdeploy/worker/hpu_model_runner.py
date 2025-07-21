@@ -39,7 +39,8 @@ from fastdeploy.model_executor.model_loader import get_model_from_loader
 from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
-from fastdeploy.model_executor.ops.intel_hpu import (save_output, step_paddle, update_inputs_v2)
+from fastdeploy.model_executor.ops.intel_hpu import (
+    save_output, step_paddle, rebuild_padding_v2, update_inputs_v2)
 
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
                  model_output: ModelOutputData) -> None:
@@ -151,6 +152,95 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["next_tokens"],
             share_inputs["first_token_ids"]
         )
+
+from fastdeploy.model_executor.layers.linear import (
+    QKVParallelLinear, RowParallelLinear)
+from fastdeploy.model_executor.ops.intel_hpu import fused_mlp
+from fastdeploy.worker.forward_meta import ForwardMeta_HPU
+
+def fused_attention_forward(
+    self,
+    src: paddle.Tensor = None,
+    qkv_proj: QKVParallelLinear = None,
+    o_proj: RowParallelLinear = None,
+    forward_meta: ForwardMeta_HPU = None,
+):
+    """
+    The forward function of attention layer.
+    args:
+        src: the hidden states tensor
+        residual_input: the residual tensor
+        forward_meta: the forward meta data
+    """
+    return forward_meta.attn_backend.forward(
+        src,
+        qkv_proj,
+        o_proj,
+        self,
+        forward_meta,
+    )
+
+def fused_self_atten_forward(
+    self,
+    forward_meta: ForwardMeta_HPU,
+    hidden_states: paddle.Tensor,
+):
+    """
+    """
+    atten_out = self.attn(
+        src=hidden_states,
+        qkv_proj = self.qkv_proj,
+        o_proj = self.o_proj,
+        forward_meta=forward_meta,
+    )
+
+    return atten_out
+
+
+def fused_mlp_forward(self, x):
+    """
+    """
+    out = fused_mlp(
+        x,
+        self.gate_up_proj.linear_weight,
+        None,
+        self.down_proj.linear_weight,
+    )
+
+    # all_reduce
+    if self.nranks > 1:
+        from fastdeploy.distributed.communication_op import \
+            tensor_model_parallel_all_reduce
+        tensor_model_parallel_all_reduce(out)
+
+    return out
+    
+from fastdeploy.model_executor.layers.attention.attention import Attention
+from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
+from fastdeploy.model_executor.models.ernie4_5_moe import Ernie4_5_Attention, Ernie4_5_MLP
+import types
+def convert_model(model):
+    """
+    """
+    for name, module in model.named_children():
+        if len(list(module.named_children())) > 0:
+            # print(f"********** model {model.__class__.__name__} has submodule: name={name}, module={module.__class__.__name__}")
+            if isinstance(module, Ernie4_5_Attention):
+                module.forward = types.MethodType(fused_self_atten_forward, module)
+            if isinstance(module, Qwen2Attention):
+                module.forward = types.MethodType(fused_self_atten_forward, module)
+            if isinstance(module, Ernie4_5_MLP):
+                module.forward = types.MethodType(fused_mlp_forward, module)
+            if isinstance(module, Qwen2MLP):
+                module.forward = types.MethodType(fused_mlp_forward, module)
+            convert_model(module)
+        else:
+            # print(f"*********[ Leaf node]  Loading submodule: name={name} -- module: {module.__class__.__name__}")
+            if isinstance(module, Attention):
+                module.forward = types.MethodType(fused_attention_forward, module)
+    
+    return model
+
 
 class HPUModelRunner(ModelRunnerBase):
     """ """
@@ -654,6 +744,7 @@ class HPUModelRunner(ModelRunnerBase):
             block_mapping,
             attention_mask,
             batch_ids,
+            total_batch,
             is_prompt,
         ) = prepare_block_metadata(
             self.share_inputs["input_ids"],
@@ -678,6 +769,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["block_bias"] = attention_mask
         self.share_inputs["block_size"] = self.parallel_config.block_size
         self.share_inputs["batch_ids"] = batch_ids
+        self.share_inputs["total_batch"] = total_batch.item()
         self.share_inputs["is_prompt"] = is_prompt
         self.initialize_forward_meta()
 
@@ -715,6 +807,9 @@ class HPUModelRunner(ModelRunnerBase):
         # 2. Load lora model
 
         # 3. Load drafter model(for speculative decoding)
+
+        # 4. Convert model to HPU format
+        self.model = convert_model(self.model)
 
         time_after_load = time.perf_counter()
         logger.info(
@@ -1053,6 +1148,14 @@ class HPUModelRunner(ModelRunnerBase):
         # # 3. Execute model
         hiddden_states = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
+
+        hiddden_states = rebuild_padding_v2(
+            hiddden_states,
+            self.forward_meta.batch_ids,
+            self.forward_meta.total_batch,
+            self.forward_meta.seq_lens_encoder,
+            self.forward_meta.is_prompt,
+        )
 
         # # 4. Compute logits, Sample
         logits = self.model.compute_logits(hiddden_states)
