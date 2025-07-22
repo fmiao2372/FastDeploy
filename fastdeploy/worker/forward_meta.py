@@ -529,3 +529,8 @@ class ForwardMeta_HPU():
                   rotary_embs=share_inputs["rotary_embs"],
                   caches=share_inputs["caches"])
         return ret
+
+    def clear_caches(self):
+        """safe clear caches"""
+        if self.caches:
+            del self.caches

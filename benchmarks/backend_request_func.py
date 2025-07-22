@@ -87,6 +87,8 @@ async def async_request_eb_openai_chat_completions(
             "model": "default",
             "messages": request_func_input.history_QA,
             "stream": True,
+            "max_tokens" : request_func_input.output_len,
+            "min_tokens" : request_func_input.output_len,
             "stream_options": {
                 "include_usage": True,
                 "continuous_usage_stats": True
