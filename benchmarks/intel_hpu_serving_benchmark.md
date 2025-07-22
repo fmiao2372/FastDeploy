@@ -1,4 +1,4 @@
-# Intel HPU serving benchamrk
+# Intel HPU serving benchmark
 
 ## 1. start server
 
@@ -13,7 +13,7 @@ In the script, you can use FLAGS_selected_intel_hpus to select hpu card.
 ./benchmark_paddle_hpu_cli.sh
 ```
 
-## 3. rarse logs
+## 3. parse logs
 ```python
 python parse_benchmark_logs.py benchmark_fastdeploy_logs/[the targeted folder]
 ```
