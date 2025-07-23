@@ -915,18 +915,21 @@ class HPUModelRunner(ModelRunnerBase):
         self._dummy_prefill_inputs(num_tokens=num_tokens,
                                    batch_size=batch_size,
                                    expected_decode_len=expected_decode_len)
-        
+        if self.speculative_method in ["mtp"]:
+            raise NotImplementedError(
+                "speculative sampling is not supported on Intel HPU."
+            )
         while True:
 
             # 1. Compute real num_tokens
             self._prepare_inputs()
 
             # 2. Initialize attention backend and forward meta data
-            hiddden_states = self.model(self.share_inputs["ids_remove_padding"],
+            model_output = self.model(self.share_inputs["ids_remove_padding"],
                                         self.forward_meta)
 
             hiddden_states = rebuild_padding_v2(
-                hiddden_states,
+                model_output,
                 self.forward_meta.batch_ids,
                 self.forward_meta.total_batch,
                 self.forward_meta.seq_lens_encoder,
@@ -937,6 +940,8 @@ class HPUModelRunner(ModelRunnerBase):
 
             sampled_token_ids = self.sampler(logits,
                                                 self.sampling_metadata)
+            if self.parallel_config.tensor_parallel_degree > 1:
+                paddle.distributed.broadcast(sampled_token_ids, 0)
 
             # 6. post process
             model_output_data = ModelOutputData(
@@ -953,7 +958,7 @@ class HPUModelRunner(ModelRunnerBase):
                 seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
                 seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
                 is_block_step=self.share_inputs["is_block_step"],
-                full_hidden_states=hiddden_states,
+                full_hidden_states=model_output,
                 msg_queue_id=self.parallel_config.msg_queue_id,
                 mp_rank=self.local_rank,
                 use_ep=self.parallel_config.use_ep,
@@ -1102,14 +1107,14 @@ class HPUModelRunner(ModelRunnerBase):
         # # 2. Padding inputs for cuda grph
 
         # # 3. Execute model
-        hiddden_states = self.model(self.share_inputs["ids_remove_padding"],
+        model_output = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
         hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
         hiddden_states = rebuild_padding_v2(
-            hiddden_states,
+            model_output,
             self.forward_meta.batch_ids,
             self.forward_meta.total_batch,
             self.forward_meta.seq_lens_encoder,
@@ -1128,10 +1133,14 @@ class HPUModelRunner(ModelRunnerBase):
         # logits = paddle.to_tensor(data, dtype='bfloat16')
         start_time2 = time.time()
         sampled_token_ids = self.sampler(logits, self.sampling_metadata)
+        if self.parallel_config.tensor_parallel_degree > 1:
+            paddle.distributed.broadcast(sampled_token_ids, 0)
+        sampled_token_ids.cpu()
         end_time2 = time.time()
         execution_time2 = (end_time2 - start_time2) * 1000
         hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}") 
         # 5. Post Process
+        start_time3 = time.time()
         model_output_data = ModelOutputData(
             next_tokens=self.share_inputs["next_tokens"],
             stop_flags=self.share_inputs["stop_flags"],
@@ -1146,7 +1155,7 @@ class HPUModelRunner(ModelRunnerBase):
             seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
             seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
             is_block_step=self.share_inputs["is_block_step"],
-            full_hidden_states=hiddden_states,
+            full_hidden_states=model_output,
             msg_queue_id=self.parallel_config.msg_queue_id,
             mp_rank=self.local_rank,
             use_ep=self.parallel_config.use_ep,
@@ -1164,7 +1173,6 @@ class HPUModelRunner(ModelRunnerBase):
             skip_save_output = True
         else:
             skip_save_output = False
-        start_time3 = time.time()
         post_process_hpu(sampled_token_ids=sampled_token_ids,
                      model_output=model_output_data)
         end_time3 = time.time()
