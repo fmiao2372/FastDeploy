@@ -1096,7 +1096,6 @@ class HPUModelRunner(ModelRunnerBase):
             intermediate_tensors:
         """
         # # 1. Prepare inputs of model and decoder.
-        import time
         start_time = time.time()
         self._prepare_inputs()
 
