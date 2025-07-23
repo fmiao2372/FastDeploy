@@ -303,6 +303,16 @@ class HPUModelRunner(ModelRunnerBase):
             self.local_rank +
             int(self.parallel_config.engine_worker_queue_port))
 
+        if int(os.environ.get("HABANA_PROFILE", 0)) == 1:
+            step_start = int(os.environ.get("PROFILE_START", 0))
+            step_end = int(os.environ.get("PROFILE_END", 4))
+            import paddle.profiler as profiler
+            self.prof = profiler.Profiler(
+                targets=[profiler.ProfilerTarget.CPU, profiler.ProfilerTarget.CUSTOM_DEVICE],
+                scheduler=(step_start, step_end),
+                on_trace_ready = profiler.export_chrome_tracing('./profile'))
+            self.prof.start()
+
     def prefill_finished(self):
         """
         check whether prefill stage finished
@@ -1215,6 +1225,9 @@ class HPUModelRunner(ModelRunnerBase):
 
         self._update_chunked_prefill(model_forward_batch)
         self._add_cache(model_forward_batch)
+
+        if int(os.environ.get("HABANA_PROFILE", 0)) == 1:
+            self.prof.step()
         return None
 
     def _add_cache(self, model_forward_batch) -> None:
