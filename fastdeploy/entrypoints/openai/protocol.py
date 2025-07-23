@@ -397,6 +397,7 @@ class ChatCompletionRequest(BaseModel):
         deprecated=
         'max_tokens is deprecated in favor of the max_completion_tokens field')
     max_completion_tokens: Optional[int] = None
+    min_tokens: Optional[int] = None
     n: Optional[int] = 1
     presence_penalty: Optional[float] = None
     seed: Optional[int] = None

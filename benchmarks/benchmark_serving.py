@@ -39,7 +39,7 @@ from tqdm.asyncio import tqdm
 
 from argparse import ArgumentParser as FlexibleArgumentParser
 
-from benchmark_dataset import (SampleRequest, EBDataset, EBChatDataset)
+from benchmark_dataset import (SampleRequest, EBDataset, EBChatDataset, RandomDataset)
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
@@ -694,6 +694,11 @@ def main(args: argparse.Namespace):
                                   dataset_path=args.dataset_path).sample(
                 num_requests=args.num_prompts,
                 output_len=args.sharegpt_output_len,
+        ),
+        "random": lambda: RandomDataset(dataset_path=args.dataset_path).sample(
+                num_requests=args.num_prompts,
+                input_len=args.random_input_len,
+                output_len=args.random_output_len,
         ),
     }
 

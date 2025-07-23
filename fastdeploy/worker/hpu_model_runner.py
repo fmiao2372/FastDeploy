@@ -41,11 +41,14 @@ from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
 from fastdeploy.model_executor.ops.intel_hpu import (
     save_output, step_paddle, rebuild_padding_v2, update_inputs_v2)
+from fastdeploy.utils import get_logger
+
+hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_model_runner_profile.log")
 
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
                  model_output: ModelOutputData) -> None:
     """ Post-processing steps after completing a single token generation. """
-
+    start_time = time.time() 
     update_inputs_v2(
         model_output.stop_flags,
         model_output.step_idx,
@@ -61,13 +64,19 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
         model_output.eos_token_id,
         model_output.next_tokens,
     )
+    end_time = time.time()
+    execution_time = (end_time - start_time) * 1000
+    hpu_model_runner_profile_logger.info(f"post_process_hpu::update_inputs_v2 execution time(ms): {execution_time}") 
 
-
+    start_time = time.time()
     save_output(
         sampled_token_ids,
         model_output.not_need_stop,
         model_output.mp_rank,
     )
+    end_time = time.time()
+    execution_time = (end_time - start_time) * 1000
+    hpu_model_runner_profile_logger.info(f"post_process_hpu::save_output execution time(ms): {execution_time}") 
 
 def recover_block(self,
                 recover_block_list,   #cpu
@@ -917,71 +926,32 @@ class HPUModelRunner(ModelRunnerBase):
                                    batch_size=batch_size,
                                    expected_decode_len=expected_decode_len)
         if self.speculative_method in ["mtp"]:
-            self.proposer.dummy_prefill_inputs(
-                num_tokens=num_tokens,
-                batch_size=batch_size,
-                expected_decode_len=expected_decode_len)
+            raise NotImplementedError(
+                "speculative sampling is not supported on Intel HPU."
+            )
         while True:
 
             # 1. Compute real num_tokens
             self._prepare_inputs()
 
             # 2. Initialize attention backend and forward meta data
+            model_output = self.model(self.share_inputs["ids_remove_padding"],
+                                        self.forward_meta)
 
-            # 3. Prepare lora
-
-            # 4. Run model
-            is_decode_batch = not ((self.share_inputs["seq_lens_this_time"]
-                                    > 1).sum() > 0)
-            self.forward_meta.step_use_cudagraph = is_decode_batch and in_capturing
-            self.forward_meta.is_decode_batch = is_decode_batch
-            model_output = self.model(
-                ids_remove_padding=self.share_inputs["ids_remove_padding"],
-                forward_meta=self.forward_meta)
-
-            hiddden_states = rebuild_padding(
+            hiddden_states = rebuild_padding_v2(
                 model_output,
-                self.share_inputs["cum_offsets"],
-                self.share_inputs["seq_lens_this_time"],
-                self.share_inputs["seq_lens_decoder"],
-                self.share_inputs["seq_lens_encoder"],
-                self.share_inputs["output_padding_offset"]
-                if self.speculative_decoding else
-                None,  # speculative decoding requires
-                self.parallel_config.max_model_len,
+                self.forward_meta.batch_ids,
+                self.forward_meta.total_batch,
+                self.forward_meta.seq_lens_encoder,
+                self.forward_meta.is_prompt,
             )
-
             # 5. Execute spec decode
             logits = self.model.compute_logits(hiddden_states)
 
-            if not self.speculative_decoding:
-                set_value_by_flags_and_idx(
-                    self.share_inputs["pre_ids"],
-                    self.share_inputs["input_ids"],
-                    self.share_inputs["seq_lens_this_time"],
-                    self.share_inputs["seq_lens_encoder"],
-                    self.share_inputs["seq_lens_decoder"],
-                    self.share_inputs["step_idx"],
-                    self.share_inputs["stop_flags"],
-                )
-                sampled_token_ids = self.sampler(logits,
-                                                 self.sampling_metadata)
-                if self.parallel_config.tensor_parallel_degree > 1:
-                    paddle.distributed.broadcast(sampled_token_ids, 0)
-            else:
-                self.sampler(logits, self.sampling_metadata,
-                             self.parallel_config.max_model_len,
-                             self.share_inputs)
-                sampled_token_ids = None
-                if self.parallel_config.tensor_parallel_degree > 1:
-                    paddle.distributed.broadcast(
-                        self.share_inputs["accept_tokens"], 0)
-                    paddle.distributed.broadcast(
-                        self.share_inputs["accept_num"], 0)
-                    paddle.distributed.broadcast(self.share_inputs["step_idx"],
-                                                 0)
-                    paddle.distributed.broadcast(
-                        self.share_inputs["stop_flags"], 0)
+            sampled_token_ids = self.sampler(logits,
+                                                self.sampling_metadata)
+            if self.parallel_config.tensor_parallel_degree > 1:
+                paddle.distributed.broadcast(sampled_token_ids, 0)
 
             # 6. post process
             model_output_data = ModelOutputData(
@@ -1012,24 +982,14 @@ class HPUModelRunner(ModelRunnerBase):
                 accept_num=self.share_inputs["accept_num"]
                 if self.speculative_decoding else None)
 
-            post_process(sampled_token_ids=sampled_token_ids,
-                         model_output=model_output_data,
-                         speculative_decoding=self.speculative_decoding,
-                         skip_save_output=True)
-
-            if self.speculative_decoding:
-                if self.speculative_method == "mtp":
-                    self.proposer.run(full_hidden_states=model_output)
-                else:
-                    self.proposer.run(share_inputs=self.share_inputs)
+            post_process_hpu(sampled_token_ids=sampled_token_ids,
+                     model_output=model_output_data)
 
             # 7. Updata 'infer_seed' and step_cuda()
             self.share_inputs["infer_seed"].add_(self.infer_seed_increment)
             self.share_inputs["infer_seed"][:] %= self.MAX_INFER_SEED
-            step_cuda(self.share_inputs, self.parallel_config.block_size,
-                      self.parallel_config.enc_dec_block_num,
-                      self.speculative_config,
-                      self.parallel_config.enable_prefix_caching)
+            step_intel_hpu(self.share_inputs, self.parallel_config.block_size,
+                      self.parallel_config.max_model_len)
 
             if int((self.share_inputs['seq_lens_this_time'] > 0).sum()) == 0:
                 break
@@ -1151,16 +1111,20 @@ class HPUModelRunner(ModelRunnerBase):
             intermediate_tensors:
         """
         # # 1. Prepare inputs of model and decoder.
+        start_time = time.time()
         self._prepare_inputs()
 
         # # 2. Padding inputs for cuda grph
 
         # # 3. Execute model
-        hiddden_states = self.model(self.share_inputs["ids_remove_padding"],
+        model_output = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
         hiddden_states = rebuild_padding_v2(
-            hiddden_states,
+            model_output,
             self.forward_meta.batch_ids,
             self.forward_meta.total_batch,
             self.forward_meta.seq_lens_encoder,
@@ -1168,13 +1132,25 @@ class HPUModelRunner(ModelRunnerBase):
         )
 
         # # 4. Compute logits, Sample
+        start_time = time.time()
+        start_time1 = time.time()
         logits = self.model.compute_logits(hiddden_states)
+        end_time1 = time.time()
+        execution_time1 = (end_time1 - start_time1) * 1000
+        hpu_model_runner_profile_logger.info(f"ComputeLogits execution time(ms): {execution_time1}")        
         
         # data = np.random.rand(self.parallel_config.max_num_seqs, self.model_config.vocab_size).astype(np.float32)
         # logits = paddle.to_tensor(data, dtype='bfloat16')
+        start_time2 = time.time()
         sampled_token_ids = self.sampler(logits, self.sampling_metadata)
-
+        if self.parallel_config.tensor_parallel_degree > 1:
+            paddle.distributed.broadcast(sampled_token_ids, 0)
+        sampled_token_ids.cpu()
+        end_time2 = time.time()
+        execution_time2 = (end_time2 - start_time2) * 1000
+        hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}") 
         # 5. Post Process
+        start_time3 = time.time()
         model_output_data = ModelOutputData(
             next_tokens=self.share_inputs["next_tokens"],
             stop_flags=self.share_inputs["stop_flags"],
@@ -1189,7 +1165,7 @@ class HPUModelRunner(ModelRunnerBase):
             seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
             seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
             is_block_step=self.share_inputs["is_block_step"],
-            full_hidden_states=hiddden_states,
+            full_hidden_states=model_output,
             msg_queue_id=self.parallel_config.msg_queue_id,
             mp_rank=self.local_rank,
             use_ep=self.parallel_config.use_ep,
@@ -1209,6 +1185,12 @@ class HPUModelRunner(ModelRunnerBase):
             skip_save_output = False
         post_process_hpu(sampled_token_ids=sampled_token_ids,
                      model_output=model_output_data)
+        end_time3 = time.time()
+        execution_time3 = (end_time3 - start_time3) * 1000
+        hpu_model_runner_profile_logger.info(f"PostProcessHpu execution time(ms): {execution_time3}")         
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+        hpu_model_runner_profile_logger.info(f"PostProcessing execution time(ms): {execution_time}")
 
         # 6. Speculative decode
         if self.speculative_decoding:
@@ -1220,9 +1202,12 @@ class HPUModelRunner(ModelRunnerBase):
         # 7. Updata 'infer_seed' and step_cuda()
         self.share_inputs["infer_seed"].add_(self.infer_seed_increment)
         self.share_inputs["infer_seed"][:] %= self.MAX_INFER_SEED
-        # step_intel_hpu(self.share_inputs, self.parallel_config.block_size,
-        #           self.parallel_config.max_model_len)
-
+        start_time = time.time()
+        step_intel_hpu(self.share_inputs, self.parallel_config.block_size,
+                       self.parallel_config.max_model_len)
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+        hpu_model_runner_profile_logger.info(f"StepPaddle execution time(ms): {execution_time}")
         self._update_chunked_prefill(model_forward_batch)
         self._add_cache(model_forward_batch)
 
@@ -1304,9 +1289,9 @@ class HPUModelRunner(ModelRunnerBase):
         self.free_list_len = len(free_list)
         self.share_inputs.update({
             "free_list":
-            paddle.to_tensor(free_list, dtype="int32"),
+            paddle.to_tensor(free_list, dtype="int32").cpu(),
             "free_list_len":
-            paddle.full([1], self.free_list_len, dtype="int32"),
+            paddle.full([1], self.free_list_len, dtype="int32").cpu(),
         })
 
         self.parallel_config.do_profile = False
