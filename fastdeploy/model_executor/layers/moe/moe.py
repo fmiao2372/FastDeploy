@@ -96,8 +96,9 @@ class FusedMoE(nn.Layer):
             # now, no quant method(w_fp16 a_fp16) can't get from quant_config, we will optimize it in future
             from fastdeploy.platforms import current_platform
             if current_platform.is_intel_hpu():
-                from .fused_moe_hpu_backend import HpuMoEMethod
+                from .fused_moe_hpu_backend import HpuMoEMethod, HpuTensorWiseFP8MoEMethod
                 self.quant_method = HpuMoEMethod(None)
+                #self.quant_method = HpuTensorWiseFP8MoEMethod(None)
             else:
                 from .fused_moe_cutlass_backend import CutlassMoEMethod
                 self.quant_method = CutlassMoEMethod(None)
