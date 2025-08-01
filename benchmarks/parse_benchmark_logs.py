@@ -3,7 +3,10 @@ import re
 import csv
 import sys
 
-log_pattern = re.compile(r'benchmarkdata_(.+?)_inputlength_(\d+)_outputlength_(\d+)_batchsize_(\d+)_numprompts_(\d+)_.*(?<!_profile)\.log$')
+log_patterns = [
+    re.compile(r'benchmarkdata_(.+?)_inputlength_(\d+)_outputlength_(\d+)_batchsize_(\d+)_numprompts_(\d+)_.*(?<!_profile)\.log$'),
+    re.compile(r'benchmarkdata_(.+?)_sharegpt_prompts_(\d+)_concurrency_(\d+)_.*(?<!_profile)\.log$'),
+]
 
 metrics = [
     ("Mean Decode", r"Mean Decode:\s+([\d\.]+)"),
@@ -68,7 +71,13 @@ def main():
         natsort_available = True
     except ImportError:
         natsort_available = False
-    files = [f for f in os.listdir(log_dir) if log_pattern.match(f)]
+    all_files = set(os.listdir(log_dir))
+    files = []
+    for f in os.listdir(log_dir):
+        for pat in log_patterns:
+            if pat.match(f):
+                files.append(f)
+                break
     if natsort_available:
         files = natsorted(files)
     else:
@@ -76,14 +85,26 @@ def main():
         def natural_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in _re.split('([0-9]+)', s)]
         files.sort(key=natural_key)
-    all_files = set(os.listdir(log_dir))
     rows = []
 
     for file in files:
-        m = log_pattern.match(file)
+        m = None
+        matched_idx = -1
+        for idx, pat in enumerate(log_patterns):
+            m = pat.match(file)
+            if m:
+                matched_idx = idx
+                break
         if not m:
             continue
-        model_name, input_len, output_len, batch_size, num_prompts = m.groups()
+        # model_name, input_len, output_len, batch_size, num_prompts
+        # model_name, num_prompts, max_concurrency
+        if matched_idx == 0:
+            model_name, input_len, output_len, batch_size, num_prompts = m.groups()
+        elif matched_idx == 1:
+            model_name, num_prompts, max_concurrency = m.groups()
+            input_len = '-'
+            output_len = '-'
         if file.endswith('.log'):
             profile_file = file[:-4] + '_profile.log'
         else:
@@ -101,10 +122,11 @@ def main():
             steppaddle_first = sf if sf is not None else ''
             steppaddle_average = sa if sa is not None else ''
         data = parse_benchmark_log_file(os.path.join(log_dir, file))
+        data["dataset"] = "FixedRandom" if matched_idx == 0 else "ShareGPT"
         data["model_name"] = model_name
         data["input_length"] = input_len
         data["output_length"] = output_len
-        data["batch_size"] = batch_size
+        data["batch_size"] = batch_size if matched_idx == 0 else max_concurrency
         data["num_prompts"] = num_prompts
         data["model_execute_first"] = model_first
         data["model_execute_average"] = model_average
@@ -125,7 +147,7 @@ def main():
     else:
         csv_filename = f"benchmark_summary_{log_dir_name}_{ts}.csv"
     fieldnames = [
-        "model_name", "input_length", "output_length", "batch_size", "num_prompts", 
+        "model_name", "dataset", "input_length", "output_length", "batch_size", "num_prompts", 
         ] + [name for name, _ in metrics] + ["model_execute_first", "model_execute_average", "postprocessing_execute_first", "postprocessing_execute_average", "steppaddle_execute_first", "steppaddle_execute_average"]
     with open(csv_filename, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

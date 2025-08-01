@@ -19,6 +19,9 @@
 model="/data/disk2/ERNIE-4.5-21B-A3B-Paddle"
 model_log_name="ERNIE-4.5-21B-A3B-Paddle"
 model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
+# model="/data/disk3/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle"
+# model_log_name="ERNIE-4.5-300B-A47B-Paddle"
+# model_yaml="yaml/eb45-300b-a47b-32k-bf16.yaml"
 
 input_lengths=(128 1024)
 output_lengths=(128 1024)
@@ -26,7 +29,7 @@ batch_sizes=(1 2 4 8 16 32 64 128)
 
 workspace=$(pwd)
 cd $workspace
-log_home=$workspace/benchmark_fastdeploy_logs/$(TZ='Asia/Shanghai' date '+WW%V')_$(TZ='Asia/Shanghai' date +%F-%H-%M-%S)
+log_home=$workspace/benchmark_fastdeploy_logs/$(TZ='Asia/Shanghai' date '+WW%V')_$(TZ='Asia/Shanghai' date +%F-%H-%M-%S)_${model_log_name}_FixedLen
 
 mkdir -p ${log_home}
 
