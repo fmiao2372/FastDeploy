@@ -3,6 +3,7 @@ export GC_KERNEL_PATH=/usr/local/lib/python3.10/dist-packages/paddle_custom_devi
 export INTEL_HPU_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PADDLE_DISTRI_BACKEND=xccl
 export PADDLE_XCCL_BACKEND=intel_hpu
+# export FLAGS_intel_hpu_recipe_cache_config=/tmp/recipe,false,10240
 
 export FLAGS_selected_intel_hpus=0
 rm -rf log 2>/dev/null
