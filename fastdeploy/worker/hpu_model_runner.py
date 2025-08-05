@@ -1121,7 +1121,7 @@ class HPUModelRunner(ModelRunnerBase):
             current_prefill_batch += prefill_batch_step
 
         for prefill_batch in prefill_batchs:
-            for prefill_length in range(self.parallel_config.block_size, warmup_max_model_len, self.parallel_config.block_size):
+            for prefill_length in range(self.parallel_config.block_size, int(warmup_max_model_len / 4) if self.parallel_config.tensor_parallel_degree >= 8 else warmup_max_model_len, self.parallel_config.block_size):
                 if prefill_length * prefill_batch > self.parallel_config.max_num_batched_tokens:
                     continue
                 logger.info(f"Warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length} start")
