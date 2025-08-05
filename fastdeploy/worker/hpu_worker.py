@@ -15,6 +15,7 @@
 """
 import gc
 import time
+import os
 from typing import List, Optional
 
 import paddle
@@ -180,6 +181,13 @@ class HpuWorker(WorkerBase):
         """
         # 1. Warm up model
         # NOTE(gongshaotian): may be not need warm_up at this place
+        if int(os.environ.get("HPU_WARMUP_BUCKET", 0)) == 1:
+            logger.info("Warmup bucket is enabled, start warmup bucket")
+            self.model_runner.is_warmuping = True
+            self.model_runner.warm_up_bucket()
+            self.model_runner.is_warmuping = False
+        else:
+            logger.info("Skipping warmup bucket, please set HPU_WARMUP_BUCKET=1 to enable it.")
 
         # 2. Triger cuda grpah capture
         self.model_runner.capture_model()
