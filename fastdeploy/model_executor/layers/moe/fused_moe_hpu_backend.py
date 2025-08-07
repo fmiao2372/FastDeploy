@@ -19,6 +19,7 @@ from paddle import nn
 
 from fastdeploy.distributed.communication_op import \
     tensor_model_parallel_all_reduce
+from ..utils import create_and_set_parameter
 from .fused_moe_backend_base import MoEMethodBase
 
 class HpuMoEMethod(MoEMethodBase):
@@ -33,20 +34,12 @@ class HpuMoEMethod(MoEMethodBase):
         """
         # bf16
         ffn1_weights, ffn2_weights = layer.extract_moe_ffn_weights(state_dict)
-
-        for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
-            weights_name = self.added_weight_attrs[idx]
-
-            weights_list = []
-            for i in range(layer.num_local_experts):
-                weight_tensor = weights_tensor[i]
-                weight = layer.create_parameter(
-                    shape=weight_tensor.shape,
-                    dtype=weight_tensor.dtype,
-                    default_initializer=paddle.nn.initializer.Constant(0))
-                weight.set_value(weight_tensor)
-                weights_list.append(weight)
-            setattr(layer, weights_name, weights_list)
+        stacked_ffn1_weights = paddle.stack(ffn1_weights, axis=0)
+        stacked_ffn2_weights = paddle.stack(ffn2_weights, axis=0)
+        for idx, weight_tensor in enumerate(
+            [stacked_ffn1_weights, stacked_ffn2_weights]):
+            weight_name = self.added_weight_attrs[idx]
+            create_and_set_parameter(layer, weight_name, weight_tensor)
 
     def apply_ep_prefill(
         self,
@@ -119,15 +112,15 @@ class HpuMoEMethod(MoEMethodBase):
         '''
 
         from paddlenlp_ops import fused_gate_moe
-        fused_moe_out = fused_gate_moe(x, gate_out, layer.gate_correction_bias, 
-                                        layer.moe_ffn1_weight,
-                                        layer.moe_ffn2_weight,
-                                        layer.top_k, layer.moe_use_gate_correction_bias, 
-                                        norm_topk_prob=True,
-                                        permuted_weights=False, 
-                                        activation="silu",
-                                        experts_min=0,
-                                        experts_max=layer.num_experts - 1,)
+        fused_moe_out = fused_gate_moe(x, gate_out, layer.gate_correction_bias,
+                                       layer.moe_ffn1_weight,
+                                       layer.moe_ffn2_weight,
+                                       layer.top_k, layer.moe_use_gate_correction_bias,
+                                       norm_topk_prob=True,
+                                       permuted_weights=False,
+                                       activation="silu",
+                                       experts_min=0,
+                                       experts_max=layer.num_experts - 1,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)
@@ -162,8 +155,12 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 weights_list.append(quant_weight)
                 scales_list.append(scale)
 
-            setattr(layer, weights_name, weights_list)
-            setattr(layer, scales_name, scales_list)
+            quanted_weight = paddle.stack(weights_list, axis=0)
+            create_and_set_parameter(layer, weights_name, quanted_weight)
+
+            quanted_weight_scale = paddle.stack(scales_list, axis=0)
+            create_and_set_parameter(layer, scales_name, quanted_weight_scale)
+
 
     def apply_ep_prefill(
         self,
@@ -205,17 +202,17 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
 
         from paddlenlp_ops import fused_gate_moe_fp8
         fused_moe_out = fused_gate_moe_fp8(x, gate_out, layer.gate_correction_bias,
-                                        layer.moe_ffn1_weight,
-                                        layer.moe_ffn2_weight,
-                                        None, # intermediate_hidden_states_scales
-                                        layer.moe_ffn1_weight_scale,
-                                        layer.moe_ffn2_weight_scale,
-                                        layer.top_k, layer.moe_use_gate_correction_bias,
-                                        norm_topk_prob=True,
-                                        permuted_weights=False,
-                                        activation="silu",
-                                        experts_min=0,
-                                        experts_max=layer.num_experts - 1,)
+                                           layer.moe_ffn1_weight,
+                                           layer.moe_ffn2_weight,
+                                           None, # intermediate_hidden_states_scales
+                                           layer.moe_ffn1_weight_scale,
+                                           layer.moe_ffn2_weight_scale,
+                                           layer.top_k, layer.moe_use_gate_correction_bias,
+                                           norm_topk_prob=True,
+                                           permuted_weights=False,
+                                           activation="silu",
+                                           experts_min=0,
+                                           experts_max=layer.num_experts - 1,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)
