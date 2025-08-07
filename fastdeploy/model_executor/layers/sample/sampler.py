@@ -225,6 +225,8 @@ class Sampler(nn.Layer):
         self,
         logits: paddle.Tensor,
         sampling_metadata: SamplingMetadata,
+        batch_ids: paddle.Tensor,
+        max_batch: int,
     ) -> paddle.Tensor:
         """
         """
@@ -255,6 +257,14 @@ class Sampler(nn.Layer):
 
         _, next_tokens = paddle.tensor.top_p_sampling(probs,
                                                       sampling_metadata.top_p)
+
+        if next_tokens.shape[0] != max_batch:
+            dim = next_tokens.shape[-1]
+            tmp_tokens = paddle.zeros((max_batch, dim), dtype=next_tokens.dtype)
+            tmp_tokens = paddle.scatter(
+                tmp_tokens, batch_ids, next_tokens[: batch_ids.shape[0], :]
+            )
+            return tmp_tokens
 
         return next_tokens
 

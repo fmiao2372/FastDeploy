@@ -163,6 +163,26 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["first_token_ids"]
         )
 
+# TODO: replace rebuild_padding_v3 in CustomDevice if we adopt this version pp optimization
+def rebuild_padding_v3_1(
+    tmp_out,
+    batch_ids,
+    total_batch,
+    seq_lens_encoder,
+    is_prompt=None,
+):
+    dim_emb = tmp_out.shape[-1]
+    output_data = paddle.zeros((total_batch, dim_emb))
+    if is_prompt is True:  # context
+        tmp_out = tmp_out.reshape([total_batch, -1, dim_emb])
+        for i in range(batch_ids.shape[0]):
+            seq_len = seq_lens_encoder[batch_ids[i]].item()
+            output_data[i] = tmp_out[i, seq_len - 1]
+    elif is_prompt is False:
+        output_data[0 : batch_ids.shape[0], :] = tmp_out[: batch_ids.shape[0], :]
+
+    return output_data
+
 from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
 from fastdeploy.model_executor.ops.intel_hpu import fused_mlp
@@ -793,23 +813,73 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["is_prompt"] = is_prompt
         self.initialize_forward_meta()
 
-        # Get sampling metadata
-        self.sampling_metadata = SamplingMetadata(
-            temperature=self.share_inputs["temperature"],
-            top_p=self.share_inputs["top_p"],
-            step_idx=self.share_inputs["step_idx"],
-            prompt_token_ids=self.share_inputs["input_ids"],
-            pre_token_ids=self.share_inputs["pre_ids"],
-            stop_flags=self.share_inputs["stop_flags"],
-            seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
-            seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
-            frequency_penalties=self.share_inputs["frequency_score"],
-            presence_penalties=self.share_inputs["presence_score"],
-            repetition_penalties=self.share_inputs["penalty_score"],
-            min_dec_lens=self.share_inputs["min_dec_len"],
-            bad_words_token_ids=self.share_inputs["bad_tokens"],
-            eos_token_ids=self.share_inputs["eos_token_id"],
-        )
+    def _prepare_sampler_inputs(self, sampled_ids) -> None:
+        if len(sampled_ids) == self.share_inputs["temperature"].shape[0]:
+            self.sampling_metadata = SamplingMetadata(
+                temperature=self.share_inputs["temperature"],
+                top_p = self.share_inputs["top_p"],
+                step_idx = self.share_inputs["step_idx"],
+                prompt_token_ids = self.share_inputs["input_ids"],
+                pre_token_ids = self.share_inputs["pre_ids"],
+                stop_flags = self.share_inputs["stop_flags"],
+                seq_lens_encoder = self.share_inputs["seq_lens_encoder"],
+                seq_lens_decoder = self.share_inputs["seq_lens_decoder"],
+                frequency_penalties = self.share_inputs["frequency_score"],
+                presence_penalties = self.share_inputs["presence_score"],
+                repetition_penalties = self.share_inputs["penalty_score"],
+                min_dec_lens = self.share_inputs["min_dec_len"],
+                bad_words_token_ids = self.share_inputs["bad_tokens"],
+                eos_token_ids = self.share_inputs["eos_token_id"],
+            )
+        else:
+            total_batch = self.forward_meta.total_batch
+
+            field_mappings = {
+                "temperature": "temperature",
+                "top_p": "top_p",
+                "step_idx": "step_idx",
+                "prompt_token_ids": "input_ids",
+                "pre_token_ids": "pre_ids",
+                "stop_flags": "stop_flags",
+                "seq_lens_encoder": "seq_lens_encoder",
+                "seq_lens_decoder": "seq_lens_decoder",
+                "frequency_penalties": "frequency_score",
+                "presence_penalties": "presence_score",
+                "repetition_penalties": "penalty_score",
+                "min_dec_lens": "min_dec_len",
+            }
+
+            sampling_vars = {}
+            sampled_count = sampled_ids.shape[0]
+
+            for var_name, input_key in field_mappings.items():
+                source_tensor = self.share_inputs[input_key]
+                sampling_vars[var_name] = paddle.zeros(
+                    (total_batch, source_tensor.shape[1]),
+                    dtype=source_tensor.dtype
+                )
+                sampling_vars[var_name][:sampled_count, :] = paddle.index_select(
+                    source_tensor,
+                    axis=0,
+                    index=sampled_ids
+                )
+
+            self.sampling_metadata = SamplingMetadata(
+                temperature=sampling_vars["temperature"],
+                top_p = sampling_vars["top_p"],
+                step_idx = sampling_vars["step_idx"],
+                prompt_token_ids = sampling_vars["prompt_token_ids"],
+                pre_token_ids = sampling_vars["pre_token_ids"],
+                stop_flags = sampling_vars["stop_flags"],
+                seq_lens_encoder = sampling_vars["seq_lens_encoder"],
+                seq_lens_decoder = sampling_vars["seq_lens_decoder"],
+                frequency_penalties = sampling_vars["frequency_penalties"],
+                presence_penalties = sampling_vars["presence_penalties"],
+                repetition_penalties = sampling_vars["repetition_penalties"],
+                min_dec_lens = sampling_vars["min_dec_lens"],
+                bad_words_token_ids = self.share_inputs["bad_tokens"],
+                eos_token_ids = self.share_inputs["eos_token_id"],
+            )
 
     def load_model(self) -> None:
         """ load or download model """
@@ -939,7 +1009,7 @@ class HPUModelRunner(ModelRunnerBase):
             model_output = self.model(self.share_inputs["ids_remove_padding"],
                                         self.forward_meta)
 
-            hiddden_states = rebuild_padding_v2(
+            hiddden_states = rebuild_padding_v3_1(
                 model_output,
                 self.forward_meta.batch_ids,
                 self.forward_meta.total_batch,
@@ -949,8 +1019,11 @@ class HPUModelRunner(ModelRunnerBase):
             # 5. Execute spec decode
             logits = self.model.compute_logits(hiddden_states)
 
+            self._prepare_sampler_inputs(self.forward_meta.batch_ids)
             sampled_token_ids = self.sampler(logits,
-                                                self.sampling_metadata)
+                                             self.sampling_metadata,
+                                             self.forward_meta.batch_ids,
+                                             self.forward_meta.seq_lens_encoder.shape[0])
             if self.parallel_config.tensor_parallel_degree > 1:
                 paddle.distributed.broadcast(sampled_token_ids, 0)
 
@@ -1278,7 +1351,7 @@ class HPUModelRunner(ModelRunnerBase):
         execution_time = (end_time - start_time) * 1000
         hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
-        hiddden_states = rebuild_padding_v2(
+        hiddden_states = rebuild_padding_v3_1(
             model_output,
             self.forward_meta.batch_ids,
             self.forward_meta.total_batch,
@@ -1297,7 +1370,11 @@ class HPUModelRunner(ModelRunnerBase):
         # data = np.random.rand(self.parallel_config.max_num_seqs, self.model_config.vocab_size).astype(np.float32)
         # logits = paddle.to_tensor(data, dtype='bfloat16')
         start_time2 = time.time()
-        sampled_token_ids = self.sampler(logits, self.sampling_metadata)
+        self._prepare_sampler_inputs(self.forward_meta.batch_ids)
+        sampled_token_ids = self.sampler(logits,
+                                         self.sampling_metadata,
+                                         self.forward_meta.batch_ids,
+                                         self.forward_meta.seq_lens_encoder.shape[0])
         if self.parallel_config.tensor_parallel_degree > 1:
             paddle.distributed.broadcast(sampled_token_ids, 0)
         sampled_token_ids.cpu()
