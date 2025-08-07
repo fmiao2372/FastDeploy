@@ -328,6 +328,7 @@ class HPUModelRunner(ModelRunnerBase):
         # Forward meta store the global meta information of the forward
         self.forward_meta: ForwardMeta_HPU = None
         self.is_warmuping = False
+        self.is_hpu_perf_breakdown_sync_mode = int(os.environ.get("HPU_PERF_BREAKDOWN_SYNC_MODE", 1)) == 1
         # Postprocess Env params
         os.environ["INFERENCE_MSG_QUEUE_ID"] = str(
             self.local_rank +
@@ -666,7 +667,7 @@ class HPUModelRunner(ModelRunnerBase):
                                                          dtype='int32').cpu()
         self.share_inputs["infer_seed"] = paddle.full([max_num_seqs, 1],
                                                       0,
-                                                      dtype='int64')
+                                                      dtype='int64').cpu()
         self.share_inputs["first_token_ids"] = paddle.full([max_num_seqs, 1],
                                                            -1,
                                                            dtype='int64')
@@ -1179,22 +1180,18 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["not_need_stop"][0] = True
 
     def warm_up_bucket(self) -> None:
-        max_prefill_batch = 4 # Hard-Code in FastDeploy/fastdeploy/engine/config.py and PaddleCustomDevice/backends/intel_hpu/custom_ops/python/paddlenlp_ops/llama_block_atten.py
+        max_prefill_batch = 3 # Hard-Code in FastDeploy/fastdeploy/engine/config.py
         warmup_max_model_len = min(int(os.environ.get("HPU_WARMUP_MODEL_LEN", 4096)), self.parallel_config.max_model_len)
         prefill_batchs = []
-        prefill_batch_min = 1
-        prefill_batch_step = 4
-        current_prefill_batch = prefill_batch_min
-        while current_prefill_batch < prefill_batch_step:
-            prefill_batchs.append(int(current_prefill_batch))
-            current_prefill_batch *= 2
+        prefill_batch_step = int(os.environ.get("BATCH_STEP_PREFILL", 1))
         current_prefill_batch = prefill_batch_step
         while current_prefill_batch <= max_prefill_batch:
             prefill_batchs.append(int(current_prefill_batch))
             current_prefill_batch += prefill_batch_step
 
+        max_prefill_length = self.parallel_config.block_size + (int(warmup_max_model_len / 8) if self.parallel_config.tensor_parallel_degree >= 8 else warmup_max_model_len)
         for prefill_batch in prefill_batchs:
-            for prefill_length in range(self.parallel_config.block_size, int(warmup_max_model_len / 4) if self.parallel_config.tensor_parallel_degree >= 8 else warmup_max_model_len, self.parallel_config.block_size):
+            for prefill_length in range(self.parallel_config.block_size, max_prefill_length, self.parallel_config.block_size):
                 if prefill_length * prefill_batch > self.parallel_config.max_num_batched_tokens:
                     continue
                 logger.info(f"Warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length} start")
@@ -1212,24 +1209,14 @@ class HPUModelRunner(ModelRunnerBase):
                 logger.info(f"warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length} done")
         
         decode_batchs = []
-        decode_batch_min = 1
-        decode_batch_step = 4
-        current_decode_batch = decode_batch_min
-        while current_decode_batch < decode_batch_step:
-            decode_batchs.append(int(current_decode_batch))
-            current_decode_batch *= 2
+        decode_batch_step = int(os.environ.get("BATCH_STEP_DECODE", 4))
         current_decode_batch = decode_batch_step
         while current_decode_batch <= self.parallel_config.max_num_seqs:
             decode_batchs.append(int(current_decode_batch))
             current_decode_batch += decode_batch_step
 
         decode_block_nums = []
-        decode_block_num_min = 16
-        decode_block_num_step = 16
-        current_decode_block_num = decode_block_num_min
-        while current_decode_block_num < decode_block_num_step:
-            decode_block_nums.append(int(current_decode_block_num))
-            current_decode_block_num *= 2
+        decode_block_num_step = int(os.environ.get("BLOCK_STEP_DECODE", 16))
         current_decode_block_num = decode_block_num_step
         pre_max_block_num = (
             warmup_max_model_len +
@@ -1347,10 +1334,14 @@ class HPUModelRunner(ModelRunnerBase):
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
+        if self.is_hpu_perf_breakdown_sync_mode:
+            model_output.cpu()
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
         hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
+        start_time = time.time()
+        start_time0 = time.time()
         hiddden_states = rebuild_padding_v3_1(
             model_output,
             self.forward_meta.batch_ids,
@@ -1358,9 +1349,10 @@ class HPUModelRunner(ModelRunnerBase):
             self.forward_meta.seq_lens_encoder,
             self.forward_meta.is_prompt,
         )
-
+        end_time0 = time.time()
+        execution_time0 = (end_time0 - start_time0) * 1000
+        hpu_model_runner_profile_logger.info(f"RebuildPadding execution time(ms): {execution_time0}")
         # # 4. Compute logits, Sample
-        start_time = time.time()
         start_time1 = time.time()
         logits = self.model.compute_logits(hiddden_states)
         end_time1 = time.time()
@@ -1377,7 +1369,8 @@ class HPUModelRunner(ModelRunnerBase):
                                          self.forward_meta.seq_lens_encoder.shape[0])
         if self.parallel_config.tensor_parallel_degree > 1:
             paddle.distributed.broadcast(sampled_token_ids, 0)
-        sampled_token_ids.cpu()
+        if self.is_hpu_perf_breakdown_sync_mode:
+            sampled_token_ids.cpu()
         end_time2 = time.time()
         execution_time2 = (end_time2 - start_time2) * 1000
         hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}") 
