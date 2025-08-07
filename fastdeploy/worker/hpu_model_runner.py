@@ -315,7 +315,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.infer_seed_increment = paddle.full(
             shape=[self.parallel_config.max_num_seqs, 1],
             fill_value=4,
-            dtype="int64")
+            dtype="int64").cpu()
         self.restore_chunked_prefill_request = dict()
 
         # Initialize attention Backend
