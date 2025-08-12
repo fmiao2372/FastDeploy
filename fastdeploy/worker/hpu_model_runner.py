@@ -40,13 +40,13 @@ from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
 from fastdeploy.model_executor.ops.intel_hpu import (
-    save_output, step_paddle, rebuild_padding_v2, update_inputs_v2)
+    save_output, step_paddle, recover_block, rebuild_padding_v2, update_inputs_v2)
 from fastdeploy.utils import get_logger
 
 hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_model_runner_profile.log")
 
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
-                 model_output: ModelOutputData) -> None:
+                 model_output: ModelOutputData, is_warmuping: bool) -> None:
     """ Post-processing steps after completing a single token generation. """
     start_time = time.time() 
     update_inputs_v2(
@@ -68,6 +68,8 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
     execution_time = (end_time - start_time) * 1000
     hpu_model_runner_profile_logger.info(f"post_process_hpu::update_inputs_v2 execution time(ms): {execution_time}") 
 
+    if is_warmuping:
+        return
     start_time = time.time()
     save_output(
         sampled_token_ids,
@@ -78,8 +80,7 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
     execution_time = (end_time - start_time) * 1000
     hpu_model_runner_profile_logger.info(f"post_process_hpu::save_output execution time(ms): {execution_time}") 
 
-def recover_block(self,
-                recover_block_list,   #cpu
+def recover_block_hpu(recover_block_list,   #cpu
                 recover_len,          #cpu
                 stop_flags,           #hpu
                 seq_lens_this_time,   #hpu
@@ -143,7 +144,7 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
         max_model_len
     )
     if (share_inputs["recover_lens"].item() > 0):
-        recover_block(
+        recover_block_hpu(
             share_inputs["recover_block_list"],
             share_inputs["recover_lens"],
             share_inputs["stop_flags"],
@@ -161,6 +162,26 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["next_tokens"],
             share_inputs["first_token_ids"]
         )
+
+# TODO: replace rebuild_padding_v3 in CustomDevice if we adopt this version pp optimization
+def rebuild_padding_v3_1(
+    tmp_out,
+    batch_ids,
+    total_batch,
+    seq_lens_encoder,
+    is_prompt=None,
+):
+    dim_emb = tmp_out.shape[-1]
+    output_data = paddle.zeros((total_batch, dim_emb))
+    if is_prompt is True:  # context
+        tmp_out = tmp_out.reshape([total_batch, -1, dim_emb])
+        for i in range(batch_ids.shape[0]):
+            seq_len = seq_lens_encoder[batch_ids[i]].item()
+            output_data[i] = tmp_out[i, seq_len - 1]
+    elif is_prompt is False:
+        output_data[0 : batch_ids.shape[0], :] = tmp_out[: batch_ids.shape[0], :]
+
+    return output_data
 
 from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
@@ -294,7 +315,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.infer_seed_increment = paddle.full(
             shape=[self.parallel_config.max_num_seqs, 1],
             fill_value=4,
-            dtype="int64")
+            dtype="int64").cpu()
         self.restore_chunked_prefill_request = dict()
 
         # Initialize attention Backend
@@ -305,8 +326,9 @@ class HPUModelRunner(ModelRunnerBase):
         self.initialize_attn_backend()
 
         # Forward meta store the global meta information of the forward
-        self.forward_meta: ForwardMeta = None
-
+        self.forward_meta: ForwardMeta_HPU = None
+        self.is_warmuping = False
+        self.is_hpu_perf_breakdown_sync_mode = int(os.environ.get("HPU_PERF_BREAKDOWN_SYNC_MODE", 1)) == 1
         # Postprocess Env params
         os.environ["INFERENCE_MSG_QUEUE_ID"] = str(
             self.local_rank +
@@ -645,7 +667,7 @@ class HPUModelRunner(ModelRunnerBase):
                                                          dtype='int32').cpu()
         self.share_inputs["infer_seed"] = paddle.full([max_num_seqs, 1],
                                                       0,
-                                                      dtype='int64')
+                                                      dtype='int64').cpu()
         self.share_inputs["first_token_ids"] = paddle.full([max_num_seqs, 1],
                                                            -1,
                                                            dtype='int64')
@@ -702,7 +724,7 @@ class HPUModelRunner(ModelRunnerBase):
         # Initialize free list
         free_list = list(
             range(
-                self.parallel_config.max_block_num - 1,
+                self.parallel_config.max_block_num - 2,
                 int(self.parallel_config.max_block_num *
                     self.parallel_config.kv_cache_ratio) - 1, -1))
         self.free_list_len = len(free_list)
@@ -792,23 +814,73 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["is_prompt"] = is_prompt
         self.initialize_forward_meta()
 
-        # Get sampling metadata
-        self.sampling_metadata = SamplingMetadata(
-            temperature=self.share_inputs["temperature"],
-            top_p=self.share_inputs["top_p"],
-            step_idx=self.share_inputs["step_idx"],
-            prompt_token_ids=self.share_inputs["input_ids"],
-            pre_token_ids=self.share_inputs["pre_ids"],
-            stop_flags=self.share_inputs["stop_flags"],
-            seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
-            seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
-            frequency_penalties=self.share_inputs["frequency_score"],
-            presence_penalties=self.share_inputs["presence_score"],
-            repetition_penalties=self.share_inputs["penalty_score"],
-            min_dec_lens=self.share_inputs["min_dec_len"],
-            bad_words_token_ids=self.share_inputs["bad_tokens"],
-            eos_token_ids=self.share_inputs["eos_token_id"],
-        )
+    def _prepare_sampler_inputs(self, sampled_ids) -> None:
+        if len(sampled_ids) == self.share_inputs["temperature"].shape[0]:
+            self.sampling_metadata = SamplingMetadata(
+                temperature=self.share_inputs["temperature"],
+                top_p = self.share_inputs["top_p"],
+                step_idx = self.share_inputs["step_idx"],
+                prompt_token_ids = self.share_inputs["input_ids"],
+                pre_token_ids = self.share_inputs["pre_ids"],
+                stop_flags = self.share_inputs["stop_flags"],
+                seq_lens_encoder = self.share_inputs["seq_lens_encoder"],
+                seq_lens_decoder = self.share_inputs["seq_lens_decoder"],
+                frequency_penalties = self.share_inputs["frequency_score"],
+                presence_penalties = self.share_inputs["presence_score"],
+                repetition_penalties = self.share_inputs["penalty_score"],
+                min_dec_lens = self.share_inputs["min_dec_len"],
+                bad_words_token_ids = self.share_inputs["bad_tokens"],
+                eos_token_ids = self.share_inputs["eos_token_id"],
+            )
+        else:
+            total_batch = self.forward_meta.total_batch
+
+            field_mappings = {
+                "temperature": "temperature",
+                "top_p": "top_p",
+                "step_idx": "step_idx",
+                "prompt_token_ids": "input_ids",
+                "pre_token_ids": "pre_ids",
+                "stop_flags": "stop_flags",
+                "seq_lens_encoder": "seq_lens_encoder",
+                "seq_lens_decoder": "seq_lens_decoder",
+                "frequency_penalties": "frequency_score",
+                "presence_penalties": "presence_score",
+                "repetition_penalties": "penalty_score",
+                "min_dec_lens": "min_dec_len",
+            }
+
+            sampling_vars = {}
+            sampled_count = sampled_ids.shape[0]
+
+            for var_name, input_key in field_mappings.items():
+                source_tensor = self.share_inputs[input_key]
+                sampling_vars[var_name] = paddle.zeros(
+                    (total_batch, source_tensor.shape[1]),
+                    dtype=source_tensor.dtype
+                )
+                sampling_vars[var_name][:sampled_count, :] = paddle.index_select(
+                    source_tensor,
+                    axis=0,
+                    index=sampled_ids
+                )
+
+            self.sampling_metadata = SamplingMetadata(
+                temperature=sampling_vars["temperature"],
+                top_p = sampling_vars["top_p"],
+                step_idx = sampling_vars["step_idx"],
+                prompt_token_ids = sampling_vars["prompt_token_ids"],
+                pre_token_ids = sampling_vars["pre_token_ids"],
+                stop_flags = sampling_vars["stop_flags"],
+                seq_lens_encoder = sampling_vars["seq_lens_encoder"],
+                seq_lens_decoder = sampling_vars["seq_lens_decoder"],
+                frequency_penalties = sampling_vars["frequency_penalties"],
+                presence_penalties = sampling_vars["presence_penalties"],
+                repetition_penalties = sampling_vars["repetition_penalties"],
+                min_dec_lens = sampling_vars["min_dec_lens"],
+                bad_words_token_ids = self.share_inputs["bad_tokens"],
+                eos_token_ids = self.share_inputs["eos_token_id"],
+            )
 
     def load_model(self) -> None:
         """ load or download model """
@@ -938,7 +1010,7 @@ class HPUModelRunner(ModelRunnerBase):
             model_output = self.model(self.share_inputs["ids_remove_padding"],
                                         self.forward_meta)
 
-            hiddden_states = rebuild_padding_v2(
+            hiddden_states = rebuild_padding_v3_1(
                 model_output,
                 self.forward_meta.batch_ids,
                 self.forward_meta.total_batch,
@@ -948,8 +1020,11 @@ class HPUModelRunner(ModelRunnerBase):
             # 5. Execute spec decode
             logits = self.model.compute_logits(hiddden_states)
 
+            self._prepare_sampler_inputs(self.forward_meta.batch_ids)
             sampled_token_ids = self.sampler(logits,
-                                                self.sampling_metadata)
+                                             self.sampling_metadata,
+                                             self.forward_meta.batch_ids,
+                                             self.forward_meta.seq_lens_encoder.shape[0])
             if self.parallel_config.tensor_parallel_degree > 1:
                 paddle.distributed.broadcast(sampled_token_ids, 0)
 
@@ -983,7 +1058,7 @@ class HPUModelRunner(ModelRunnerBase):
                 if self.speculative_decoding else None)
 
             post_process_hpu(sampled_token_ids=sampled_token_ids,
-                     model_output=model_output_data)
+                     model_output=model_output_data, is_warmuping=self.is_warmuping)
 
             # 7. Updata 'infer_seed' and step_cuda()
             self.share_inputs["infer_seed"].add_(self.infer_seed_increment)
@@ -1044,6 +1119,146 @@ class HPUModelRunner(ModelRunnerBase):
     def _dummy_sampler_run(self) -> paddle.Tensor:
         """ """
         pass
+
+    def update_warmup_inputs(self, requests, is_decode=False):
+        for i in range(len(requests)):
+            request = requests[i]
+            idx = request["idx"]
+            length = len(request["input_ids"])
+            self.share_inputs["input_ids"][idx : idx + 1, :length] = np.array(request["input_ids"])
+            if is_decode:
+                self.share_inputs['seq_lens_encoder'][idx:idx + 1] = 0
+                self.share_inputs['seq_lens_decoder'][idx:idx + 1] = length
+                self.share_inputs['seq_lens_this_time'][idx:idx + 1] = 1
+                self.share_inputs['step_seq_lens_encoder'][idx:idx + 1] = 0
+                self.share_inputs['step_seq_lens_decoder'][idx:idx + 1] = length
+                self.share_inputs['step_idx'][idx:idx + 1] = 1
+            else:
+                self.share_inputs['seq_lens_encoder'][idx:idx + 1] = length
+                self.share_inputs['seq_lens_decoder'][idx:idx + 1] = 0
+                self.share_inputs['seq_lens_this_time'][idx:idx + 1] = length
+                self.share_inputs['step_seq_lens_encoder'][idx:idx + 1] = length
+                self.share_inputs['step_seq_lens_decoder'][idx:idx + 1] = 0
+                self.share_inputs['step_idx'][idx:idx + 1] = 0
+
+            if len(request["eos_token_ids"]) < self.parallel_config.eos_tokens_lens:
+                request["eos_token_ids"].append(request["eos_token_ids"][0])
+            self.share_inputs["eos_token_id"][:] = np.array(
+                request["eos_token_ids"], dtype="int64").reshape(-1, 1)
+
+            self.share_inputs["top_p"][idx:idx + 1] = request.get("top_p", 0.7)
+            self.share_inputs["temperature"][idx:idx + 1] = request.get(
+                "temperature", 0.95)
+            self.share_inputs["penalty_score"][idx:idx + 1] = request.get(
+                "repetition_penalty", 1.0)
+            self.share_inputs["frequency_score"][idx:idx + 1] = request.get(
+                "frequency_penalty", 0.0)
+            self.share_inputs["presence_score"][idx:idx + 1] = request.get(
+                "presence_penalty", 0.0)
+
+            self.share_inputs["min_dec_len"][idx:idx + 1] = request.get(
+                "min_tokens", 1)
+            self.share_inputs["max_dec_len"][idx:idx + 1] = request.get(
+                "max_tokens", 1)
+            self.share_inputs["stop_flags"][idx:idx + 1] = False
+
+            self.share_inputs["first_token_ids"][
+                idx:idx + 1] = self.share_inputs["input_ids"][idx:idx + 1, :1]
+            self.share_inputs["ori_seq_lens_encoder"][idx:idx + 1] = length
+
+            if request.get("seed") is not None:
+                self.share_inputs["infer_seed"][idx:idx +
+                                                1] = request.get("seed")
+            encoder_block_num = len(request["block_tables"])
+            self.share_inputs["encoder_block_lens"][idx:idx +
+                                                    1] = encoder_block_num
+            self.share_inputs["block_tables"][idx:idx + 1, :] = -1
+            self.share_inputs["block_tables"][
+                idx:idx + 1, :encoder_block_num] = np.array(
+                    request["block_tables"], dtype="int32")
+
+        self.share_inputs["not_need_stop"][0] = True
+
+    def warm_up_bucket(self) -> None:
+        max_prefill_batch = 3 # Hard-Code in FastDeploy/fastdeploy/engine/config.py
+        warmup_max_model_len = min(int(os.environ.get("HPU_WARMUP_MODEL_LEN", 4096)), self.parallel_config.max_model_len)
+        prefill_batchs = []
+        prefill_batch_step = int(os.environ.get("BATCH_STEP_PREFILL", 1))
+        current_prefill_batch = prefill_batch_step
+        while current_prefill_batch <= max_prefill_batch:
+            prefill_batchs.append(int(current_prefill_batch))
+            current_prefill_batch += prefill_batch_step
+
+        max_prefill_length = self.parallel_config.block_size + (int(warmup_max_model_len / 8) if self.parallel_config.tensor_parallel_degree >= 8 else warmup_max_model_len)
+        for prefill_batch in prefill_batchs:
+            for prefill_length in range(self.parallel_config.block_size, max_prefill_length, self.parallel_config.block_size):
+                if prefill_length * prefill_batch > self.parallel_config.max_num_batched_tokens:
+                    continue
+                logger.info(f"Warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length} start")
+                requests = [
+                    {
+                        "idx": i,
+                        "input_ids": [5] * (prefill_length - 1),
+                        "block_tables": list(range(prefill_length // self.parallel_config.block_size)),
+                        "eos_token_ids": [2],
+                    }
+                    for i in range(prefill_batch)
+                ]
+                self.update_warmup_inputs(requests, is_decode=False)
+                self.execute_model()
+                logger.info(f"warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length} done")
+        
+        decode_batchs = []
+        decode_batch_step = int(os.environ.get("BATCH_STEP_DECODE", 4))
+        current_decode_batch = decode_batch_step
+        while current_decode_batch <= self.parallel_config.max_num_seqs:
+            decode_batchs.append(int(current_decode_batch))
+            current_decode_batch += decode_batch_step
+
+        decode_block_nums = []
+        decode_block_num_step = int(os.environ.get("BLOCK_STEP_DECODE", 16))
+        current_decode_block_num = decode_block_num_step
+        pre_max_block_num = (
+            warmup_max_model_len +
+            self.parallel_config.block_size - 1
+        ) // self.parallel_config.block_size + self.parallel_config.enc_dec_block_num
+        while current_decode_block_num <= min(self.num_gpu_blocks, pre_max_block_num * self.parallel_config.max_num_seqs):
+            decode_block_nums.append(int(current_decode_block_num))
+            current_decode_block_num += decode_block_num_step
+
+        logger.info(f"warmup decode_batchs: {decode_batchs}, decode_block_nums: {decode_block_nums} start")
+        for decode_batch in decode_batchs:
+            for decode_block_num in decode_block_nums:
+                if  decode_block_num < decode_batch:
+                    continue
+                if decode_block_num // decode_batch * self.parallel_config.block_size > warmup_max_model_len:
+                    continue
+                if decode_block_num * self.parallel_config.block_size > self.parallel_config.max_num_batched_tokens:
+                    continue
+                blocks = [decode_block_num // decode_batch for _ in range(decode_batch)]
+                remain_block_num = decode_block_num % decode_batch
+                b = 0
+                while remain_block_num > 0:
+                    blocks[b] += 1
+                    remain_block_num -= 1
+                    b += 1
+                if blocks[0] * self.parallel_config.block_size > warmup_max_model_len:
+                    continue
+                logger.info(f"warmup decode_batch: {decode_batch}, decode_block_num: {decode_block_num} start")
+                requests = [
+                    {
+                        "idx": i,
+                        "input_ids": [5] * (blocks[i] * self.parallel_config.block_size - 1),
+                        "block_tables": list(range(blocks[i])),
+                        "eos_token_ids": [2],
+                    }
+                    for i in range(decode_batch)
+                ]
+                self.update_warmup_inputs(requests, is_decode=True)
+                self.execute_model()
+                logger.info(f"Warmup decode_batch: {decode_batch}, decode_block_num: {decode_block_num} done")
+        self.share_inputs["not_need_stop"][0] = False
+        logger.info("Warmup bucket done")        
 
     def capture_model(self) -> None:
         """
@@ -1119,20 +1334,25 @@ class HPUModelRunner(ModelRunnerBase):
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
+        if self.is_hpu_perf_breakdown_sync_mode:
+            model_output.cpu()
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
         hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
-        hiddden_states = rebuild_padding_v2(
+        start_time = time.time()
+        start_time0 = time.time()
+        hiddden_states = rebuild_padding_v3_1(
             model_output,
             self.forward_meta.batch_ids,
             self.forward_meta.total_batch,
             self.forward_meta.seq_lens_encoder,
             self.forward_meta.is_prompt,
         )
-
+        end_time0 = time.time()
+        execution_time0 = (end_time0 - start_time0) * 1000
+        hpu_model_runner_profile_logger.info(f"RebuildPadding execution time(ms): {execution_time0}")
         # # 4. Compute logits, Sample
-        start_time = time.time()
         start_time1 = time.time()
         logits = self.model.compute_logits(hiddden_states)
         end_time1 = time.time()
@@ -1142,10 +1362,15 @@ class HPUModelRunner(ModelRunnerBase):
         # data = np.random.rand(self.parallel_config.max_num_seqs, self.model_config.vocab_size).astype(np.float32)
         # logits = paddle.to_tensor(data, dtype='bfloat16')
         start_time2 = time.time()
-        sampled_token_ids = self.sampler(logits, self.sampling_metadata)
+        self._prepare_sampler_inputs(self.forward_meta.batch_ids)
+        sampled_token_ids = self.sampler(logits,
+                                         self.sampling_metadata,
+                                         self.forward_meta.batch_ids,
+                                         self.forward_meta.seq_lens_encoder.shape[0])
         if self.parallel_config.tensor_parallel_degree > 1:
             paddle.distributed.broadcast(sampled_token_ids, 0)
-        sampled_token_ids.cpu()
+        if self.is_hpu_perf_breakdown_sync_mode:
+            sampled_token_ids.cpu()
         end_time2 = time.time()
         execution_time2 = (end_time2 - start_time2) * 1000
         hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}") 
@@ -1184,7 +1409,7 @@ class HPUModelRunner(ModelRunnerBase):
         else:
             skip_save_output = False
         post_process_hpu(sampled_token_ids=sampled_token_ids,
-                     model_output=model_output_data)
+                     model_output=model_output_data, is_warmuping=self.is_warmuping)
         end_time3 = time.time()
         execution_time3 = (end_time3 - start_time3) * 1000
         hpu_model_runner_profile_logger.info(f"PostProcessHpu execution time(ms): {execution_time3}")         
@@ -1283,7 +1508,7 @@ class HPUModelRunner(ModelRunnerBase):
         # Reset free list
         free_list = list(
             range(
-                self.num_gpu_blocks - 1,
+                self.num_gpu_blocks - 2,
                 int(self.num_gpu_blocks * self.parallel_config.kv_cache_ratio)
                 - 1, -1))
         self.free_list_len = len(free_list)

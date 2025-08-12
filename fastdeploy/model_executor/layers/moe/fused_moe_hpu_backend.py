@@ -19,9 +19,8 @@ from paddle import nn
 
 from fastdeploy.distributed.communication_op import \
     tensor_model_parallel_all_reduce
+from ..utils import create_and_set_parameter
 from .fused_moe_backend_base import MoEMethodBase
-
-from fastdeploy.model_executor.ops.intel_hpu import mixture_of_experts, mixture_of_experts_fp8
 
 class HpuMoEMethod(MoEMethodBase):
     """
@@ -35,20 +34,12 @@ class HpuMoEMethod(MoEMethodBase):
         """
         # bf16
         ffn1_weights, ffn2_weights = layer.extract_moe_ffn_weights(state_dict)
-
-        for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
-            weights_name = self.added_weight_attrs[idx]
-
-            weights_list = []
-            for i in range(layer.num_local_experts):
-                weight_tensor = weights_tensor[i]
-                weight = layer.create_parameter(
-                    shape=weight_tensor.shape,
-                    dtype=weight_tensor.dtype,
-                    default_initializer=paddle.nn.initializer.Constant(0))
-                weight.set_value(weight_tensor)
-                weights_list.append(weight)
-            setattr(layer, weights_name, weights_list)
+        stacked_ffn1_weights = paddle.stack(ffn1_weights, axis=0)
+        stacked_ffn2_weights = paddle.stack(ffn2_weights, axis=0)
+        for idx, weight_tensor in enumerate(
+            [stacked_ffn1_weights, stacked_ffn2_weights]):
+            weight_name = self.added_weight_attrs[idx]
+            create_and_set_parameter(layer, weight_name, weight_tensor)
 
     def apply_ep_prefill(
         self,
@@ -87,7 +78,7 @@ class HpuMoEMethod(MoEMethodBase):
             raise NotImplementedError
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
-
+        '''
         weights = paddle.nn.functional.softmax(gate_out, axis=-1)
         if layer.moe_use_gate_correction_bias:
             scores = weights + layer.gate_correction_bias
@@ -97,41 +88,39 @@ class HpuMoEMethod(MoEMethodBase):
             routing_weights, selected_experts = paddle.topk(weights, layer.top_k, axis=-1)
         routing_weights /= paddle.sum(routing_weights, axis=-1, keepdim=True)
 
-        experts_min = 0
-        experts_max = layer.num_experts
-        expert_slice = 1
-        expert_chunk = max(1, layer.num_experts // expert_slice)
-
         common_inputs = (x, selected_experts, routing_weights.cast("bfloat16"))
-        fused_moe_out = paddle.zeros_like(x)
 
-        for idx in range(expert_slice):
-            slice_experts_min = experts_min + (expert_chunk * idx)
-            slice_experts_max = min(
-                slice_experts_min + expert_chunk, experts_max
-            )
+        common_params = (
+            False,  #permuted_weights
+            "silu", #activation,
+            0,
+            layer.num_experts - 1,
+        )
 
-            common_params = (
-                False,  #permuted_weights
-                "silu", #activation,
-                slice_experts_min,
-                slice_experts_max - 1,
-            )
-            up_gate_weights = layer.moe_ffn1_weight
-            down_weights = layer.moe_ffn2_weight
-            slice_weights = (
-                up_gate_weights[slice_experts_min : slice_experts_max],
-                down_weights[slice_experts_min : slice_experts_max],
-            )
+        weights = (
+            layer.moe_ffn1_weight,
+            layer.moe_ffn2_weight,
+        )
 
-            slice_result, _ = mixture_of_experts(
-                *common_inputs, *slice_weights, *common_params, False
-            )
-            fused_moe_out += slice_result
+        fused_moe_out, _ = mixture_of_experts(
+            *common_inputs, *weights, *common_params, False
+        )
 
         # if norm_topk_prob:
         #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
         #     fused_moe_out = fused_moe_out / routing_weights_norm
+        '''
+
+        from paddlenlp_ops import fused_gate_moe
+        fused_moe_out = fused_gate_moe(x, gate_out, layer.gate_correction_bias,
+                                       layer.moe_ffn1_weight,
+                                       layer.moe_ffn2_weight,
+                                       layer.top_k, layer.moe_use_gate_correction_bias,
+                                       norm_topk_prob=True,
+                                       permuted_weights=False,
+                                       activation="silu",
+                                       experts_min=0,
+                                       experts_max=layer.num_experts - 1,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)
@@ -166,8 +155,12 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 weights_list.append(quant_weight)
                 scales_list.append(scale)
 
-            setattr(layer, weights_name, weights_list)
-            setattr(layer, scales_name, scales_list)
+            quanted_weight = paddle.stack(weights_list, axis=0)
+            create_and_set_parameter(layer, weights_name, quanted_weight)
+
+            quanted_weight_scale = paddle.stack(scales_list, axis=0)
+            create_and_set_parameter(layer, scales_name, quanted_weight_scale)
+
 
     def apply_ep_prefill(
         self,
@@ -207,63 +200,19 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
-        weights = paddle.nn.functional.softmax(gate_out, axis=-1)
-        if layer.moe_use_gate_correction_bias:
-            scores = weights + layer.gate_correction_bias
-            _, selected_experts = paddle.topk(scores, layer.top_k, axis=-1)
-            routing_weights = paddle.index_sample(weights, selected_experts)
-        else:
-            routing_weights, selected_experts = paddle.topk(weights, layer.top_k, axis=-1)
-        routing_weights /= paddle.sum(routing_weights, axis=-1, keepdim=True)
-
-        experts_min = 0
-        experts_max = layer.num_experts
-        expert_slice = 1
-        expert_chunk = max(1, layer.num_experts // expert_slice)
-
-        fused_moe_out = paddle.zeros_like(x)
-        # quantize activation
-        x, x_scale = self.quant_fn(x)
-        common_inputs = (x, selected_experts, routing_weights.cast("bfloat16"))
-
-        for idx in range(expert_slice):
-            slice_experts_min = experts_min + (expert_chunk * idx)
-            slice_experts_max = min(
-                slice_experts_min + expert_chunk, experts_max
-            )
-
-            common_params = (
-                False,  #permuted_weights
-                "silu", #activation,
-                slice_experts_min,
-                slice_experts_max - 1,
-            )
-            up_gate_weights = layer.moe_ffn1_weight
-            down_weights = layer.moe_ffn2_weight
-
-            up_gate_weights_scales = layer.moe_ffn1_weight_scale
-            down_weights_scales = layer.moe_ffn2_weight_scale
-
-            slice_weights = (
-                up_gate_weights[slice_experts_min : slice_experts_max],
-                down_weights[slice_experts_min : slice_experts_max],
-            )
-
-            slice_weights_scales = (
-                x_scale,
-                None,
-                up_gate_weights_scales[slice_experts_min : slice_experts_max],
-                down_weights_scales[slice_experts_min : slice_experts_max],
-            )
-
-            slice_result = mixture_of_experts_fp8(
-                *common_inputs, *slice_weights, *slice_weights_scales, *common_params, True
-            )
-            fused_moe_out += slice_result
-
-        # if norm_topk_prob:
-        #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
-        #     fused_moe_out = fused_moe_out / routing_weights_norm
+        from paddlenlp_ops import fused_gate_moe_fp8
+        fused_moe_out = fused_gate_moe_fp8(x, gate_out, layer.gate_correction_bias,
+                                           layer.moe_ffn1_weight,
+                                           layer.moe_ffn2_weight,
+                                           None, # intermediate_hidden_states_scales
+                                           layer.moe_ffn1_weight_scale,
+                                           layer.moe_ffn2_weight_scale,
+                                           layer.top_k, layer.moe_use_gate_correction_bias,
+                                           norm_topk_prob=True,
+                                           permuted_weights=False,
+                                           activation="silu",
+                                           experts_min=0,
+                                           experts_max=layer.num_experts - 1,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)
