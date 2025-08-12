@@ -40,7 +40,7 @@ from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
 from fastdeploy.model_executor.ops.intel_hpu import (
-    save_output, step_paddle, rebuild_padding_v3, update_inputs_v2)
+    save_output, step_paddle, rebuild_padding_v2, update_inputs_v2)
 from fastdeploy.utils import get_logger
 
 hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_model_runner_profile.log")
@@ -792,43 +792,23 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["is_prompt"] = is_prompt
         self.initialize_forward_meta()
 
-
-    def _prepare_sampler_inputs(self, sampled_ids) -> None:
-        if len(sampled_ids) == self.share_inputs["temperature"].shape[0]:
-            self.sampling_metadata = SamplingMetadata(
-                temperature=self.share_inputs["temperature"],
-                top_p = self.share_inputs["top_p"],
-                step_idx = self.share_inputs["step_idx"],
-                prompt_token_ids = self.share_inputs["input_ids"],
-                pre_token_ids = self.share_inputs["pre_ids"],
-                stop_flags = self.share_inputs["stop_flags"],
-                seq_lens_encoder = self.share_inputs["seq_lens_encoder"],
-                seq_lens_decoder = self.share_inputs["seq_lens_decoder"],
-                frequency_penalties = self.share_inputs["frequency_score"],
-                presence_penalties = self.share_inputs["presence_score"],
-                repetition_penalties = self.share_inputs["penalty_score"],
-                min_dec_lens = self.share_inputs["min_dec_len"],
-                bad_words_token_ids = self.share_inputs["bad_tokens"],
-                eos_token_ids = self.share_inputs["eos_token_id"],
-            )
-        else:
-            self.sampling_metadata = SamplingMetadata(
-                temperature=paddle.index_select(self.share_inputs["temperature"], axis=0, index=sampled_ids),
-                top_p = paddle.index_select(self.share_inputs["top_p"], axis=0, index=sampled_ids),
-                step_idx = paddle.index_select(self.share_inputs["step_idx"], axis=0, index=sampled_ids),
-                prompt_token_ids = paddle.index_select(self.share_inputs["input_ids"], axis=0, index=sampled_ids),
-                pre_token_ids = paddle.index_select(self.share_inputs["pre_ids"], axis=0, index=sampled_ids),
-                stop_flags = paddle.index_select(self.share_inputs["stop_flags"], axis=0, index=sampled_ids),
-                seq_lens_encoder = paddle.index_select(self.share_inputs["seq_lens_encoder"], axis=0, index=sampled_ids),
-                seq_lens_decoder = paddle.index_select(self.share_inputs["seq_lens_decoder"], axis=0, index=sampled_ids),
-                frequency_penalties = paddle.index_select(self.share_inputs["frequency_score"], axis=0, index=sampled_ids),
-                presence_penalties = paddle.index_select(self.share_inputs["presence_score"], axis=0, index=sampled_ids),
-                repetition_penalties = paddle.index_select(self.share_inputs["penalty_score"], axis=0, index=sampled_ids),
-                min_dec_lens = paddle.index_select(self.share_inputs["min_dec_len"], axis=0, index=sampled_ids),
-                bad_words_token_ids = self.share_inputs["bad_tokens"],
-                eos_token_ids = self.share_inputs["eos_token_id"],
-            )
-
+        # Get sampling metadata
+        self.sampling_metadata = SamplingMetadata(
+            temperature=self.share_inputs["temperature"],
+            top_p=self.share_inputs["top_p"],
+            step_idx=self.share_inputs["step_idx"],
+            prompt_token_ids=self.share_inputs["input_ids"],
+            pre_token_ids=self.share_inputs["pre_ids"],
+            stop_flags=self.share_inputs["stop_flags"],
+            seq_lens_encoder=self.share_inputs["seq_lens_encoder"],
+            seq_lens_decoder=self.share_inputs["seq_lens_decoder"],
+            frequency_penalties=self.share_inputs["frequency_score"],
+            presence_penalties=self.share_inputs["presence_score"],
+            repetition_penalties=self.share_inputs["penalty_score"],
+            min_dec_lens=self.share_inputs["min_dec_len"],
+            bad_words_token_ids=self.share_inputs["bad_tokens"],
+            eos_token_ids=self.share_inputs["eos_token_id"],
+        )
 
     def load_model(self) -> None:
         """ load or download model """
@@ -958,22 +938,18 @@ class HPUModelRunner(ModelRunnerBase):
             model_output = self.model(self.share_inputs["ids_remove_padding"],
                                         self.forward_meta)
 
-            hidden_states = rebuild_padding_v3(
+            hiddden_states = rebuild_padding_v2(
                 model_output,
                 self.forward_meta.batch_ids,
                 self.forward_meta.total_batch,
                 self.forward_meta.seq_lens_encoder,
                 self.forward_meta.is_prompt,
             )
-
             # 5. Execute spec decode
-            logits = self.model.compute_logits(hidden_states)
+            logits = self.model.compute_logits(hiddden_states)
 
-            self._prepare_sampler_inputs(self.forward_meta.batch_ids)
             sampled_token_ids = self.sampler(logits,
-                                             self.sampling_metadata,
-                                             self.forward_meta.batch_ids,
-                                             self.forward_meta.seq_lens_encoder.shape[0])
+                                                self.sampling_metadata)
             if self.parallel_config.tensor_parallel_degree > 1:
                 paddle.distributed.broadcast(sampled_token_ids, 0)
 
@@ -1147,7 +1123,7 @@ class HPUModelRunner(ModelRunnerBase):
         execution_time = (end_time - start_time) * 1000
         hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
 
-        hidden_states = rebuild_padding_v3(
+        hiddden_states = rebuild_padding_v2(
             model_output,
             self.forward_meta.batch_ids,
             self.forward_meta.total_batch,
@@ -1158,20 +1134,15 @@ class HPUModelRunner(ModelRunnerBase):
         # # 4. Compute logits, Sample
         start_time = time.time()
         start_time1 = time.time()
-        logits = self.model.compute_logits(hidden_states)
+        logits = self.model.compute_logits(hiddden_states)
         end_time1 = time.time()
         execution_time1 = (end_time1 - start_time1) * 1000
         hpu_model_runner_profile_logger.info(f"ComputeLogits execution time(ms): {execution_time1}")        
         
         # data = np.random.rand(self.parallel_config.max_num_seqs, self.model_config.vocab_size).astype(np.float32)
         # logits = paddle.to_tensor(data, dtype='bfloat16')
-
         start_time2 = time.time()
-        self._prepare_sampler_inputs(self.forward_meta.batch_ids)
-        sampled_token_ids = self.sampler(logits,
-                                         self.sampling_metadata,
-                                         self.forward_meta.batch_ids,
-                                         self.forward_meta.seq_lens_encoder.shape[0])
+        sampled_token_ids = self.sampler(logits, self.sampling_metadata)
         if self.parallel_config.tensor_parallel_degree > 1:
             paddle.distributed.broadcast(sampled_token_ids, 0)
         sampled_token_ids.cpu()
