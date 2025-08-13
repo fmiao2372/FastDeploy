@@ -815,7 +815,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.initialize_forward_meta()
 
     def _prepare_sampler_inputs(self, sampled_ids) -> None:
-        if len(sampled_ids) == self.share_inputs["temperature"].shape[0]:
+        if self.forward_meta.total_batch == self.share_inputs["temperature"].shape[0]:
             self.sampling_metadata = SamplingMetadata(
                 temperature=self.share_inputs["temperature"],
                 top_p = self.share_inputs["top_p"],
@@ -833,51 +833,50 @@ class HPUModelRunner(ModelRunnerBase):
                 eos_token_ids = self.share_inputs["eos_token_id"],
             )
         else:
-            total_batch = self.forward_meta.total_batch
-
-            field_mappings = {
-                "temperature": "temperature",
-                "top_p": "top_p",
-                "step_idx": "step_idx",
-                "prompt_token_ids": "input_ids",
-                "pre_token_ids": "pre_ids",
-                "stop_flags": "stop_flags",
-                "seq_lens_encoder": "seq_lens_encoder",
-                "seq_lens_decoder": "seq_lens_decoder",
-                "frequency_penalties": "frequency_score",
-                "presence_penalties": "presence_score",
-                "repetition_penalties": "penalty_score",
-                "min_dec_lens": "min_dec_len",
-            }
-
-            sampling_vars = {}
-            sampled_count = sampled_ids.shape[0]
-
-            for var_name, input_key in field_mappings.items():
-                source_tensor = self.share_inputs[input_key]
-                sampling_vars[var_name] = paddle.zeros(
-                    (total_batch, source_tensor.shape[1]),
-                    dtype=source_tensor.dtype
-                )
-                sampling_vars[var_name][:sampled_count, :] = paddle.index_select(
-                    source_tensor,
-                    axis=0,
-                    index=sampled_ids
-                )
+            from paddlenlp_ops import fused_index_select
+            (
+                temperature,
+                top_p,
+                step_idx,
+                prompt_token_ids,
+                pre_token_ids,
+                stop_flags,
+                seq_lens_encoder,
+                seq_lens_decoder,
+                frequency_penalties,
+                presence_penalties,
+                repetition_penalties,
+                min_dec_lens,
+            ) = fused_index_select(
+                self.share_inputs["temperature"],
+                self.share_inputs["top_p"],
+                self.share_inputs["step_idx"],
+                self.share_inputs["input_ids"],
+                self.share_inputs["pre_ids"],
+                self.share_inputs["stop_flags"],
+                self.share_inputs["seq_lens_encoder"],
+                self.share_inputs["seq_lens_decoder"],
+                self.share_inputs["frequency_score"],
+                self.share_inputs["presence_score"],
+                self.share_inputs["penalty_score"],
+                self.share_inputs["min_dec_len"],
+                sampled_ids,
+                self.forward_meta.total_batch,
+            )
 
             self.sampling_metadata = SamplingMetadata(
-                temperature=sampling_vars["temperature"],
-                top_p = sampling_vars["top_p"],
-                step_idx = sampling_vars["step_idx"],
-                prompt_token_ids = sampling_vars["prompt_token_ids"],
-                pre_token_ids = sampling_vars["pre_token_ids"],
-                stop_flags = sampling_vars["stop_flags"],
-                seq_lens_encoder = sampling_vars["seq_lens_encoder"],
-                seq_lens_decoder = sampling_vars["seq_lens_decoder"],
-                frequency_penalties = sampling_vars["frequency_penalties"],
-                presence_penalties = sampling_vars["presence_penalties"],
-                repetition_penalties = sampling_vars["repetition_penalties"],
-                min_dec_lens = sampling_vars["min_dec_lens"],
+                temperature=temperature,
+                top_p = top_p,
+                step_idx = step_idx,
+                prompt_token_ids = prompt_token_ids,
+                pre_token_ids = pre_token_ids,
+                stop_flags = stop_flags,
+                seq_lens_encoder = seq_lens_encoder,
+                seq_lens_decoder = seq_lens_decoder,
+                frequency_penalties = frequency_penalties,
+                presence_penalties = presence_penalties,
+                repetition_penalties = repetition_penalties,
+                min_dec_lens = min_dec_lens,
                 bad_words_token_ids = self.share_inputs["bad_tokens"],
                 eos_token_ids = self.share_inputs["eos_token_id"],
             )
