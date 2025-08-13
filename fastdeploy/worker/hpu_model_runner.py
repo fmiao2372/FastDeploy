@@ -315,7 +315,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.infer_seed_increment = paddle.full(
             shape=[self.parallel_config.max_num_seqs, 1],
             fill_value=4,
-            dtype="int64")
+            dtype="int64").cpu()
         self.restore_chunked_prefill_request = dict()
 
         # Initialize attention Backend
@@ -1026,7 +1026,10 @@ class HPUModelRunner(ModelRunnerBase):
                                              self.forward_meta.batch_ids,
                                              self.forward_meta.seq_lens_encoder.shape[0])
             if self.parallel_config.tensor_parallel_degree > 1:
+                dtype = sampled_token_ids.dtype
+                sampled_token_ids = sampled_token_ids.to("float32")
                 paddle.distributed.broadcast(sampled_token_ids, 0)
+                sampled_token_ids = sampled_token_ids.to(dtype)
 
             # 6. post process
             model_output_data = ModelOutputData(
@@ -1328,9 +1331,12 @@ class HPUModelRunner(ModelRunnerBase):
         # # 1. Prepare inputs of model and decoder.
         start_time = time.time()
         self._prepare_inputs()
-
+        # self.share_inputs["ids_remove_padding"].cpu()
         # # 2. Padding inputs for cuda grph
-
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}")
+        start_time = time.time()
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
                                   self.forward_meta)
@@ -1368,7 +1374,10 @@ class HPUModelRunner(ModelRunnerBase):
                                          self.forward_meta.batch_ids,
                                          self.forward_meta.seq_lens_encoder.shape[0])
         if self.parallel_config.tensor_parallel_degree > 1:
+            dtype = sampled_token_ids.dtype
+            sampled_token_ids = sampled_token_ids.to("float32")
             paddle.distributed.broadcast(sampled_token_ids, 0)
+            sampled_token_ids = sampled_token_ids.to(dtype)
         if self.is_hpu_perf_breakdown_sync_mode:
             sampled_token_ids.cpu()
         end_time2 = time.time()
