@@ -1027,7 +1027,7 @@ class HPUModelRunner(ModelRunnerBase):
                                              self.forward_meta.seq_lens_encoder.shape[0])
             if self.parallel_config.tensor_parallel_degree > 1:
                 dtype = sampled_token_ids.dtype
-                sampled_token_ids = sampled_token_ids.to("bfloat16")
+                sampled_token_ids = sampled_token_ids.to("float32")
                 paddle.distributed.broadcast(sampled_token_ids, 0)
                 sampled_token_ids = sampled_token_ids.to(dtype)
 
@@ -1375,7 +1375,7 @@ class HPUModelRunner(ModelRunnerBase):
                                          self.forward_meta.seq_lens_encoder.shape[0])
         if self.parallel_config.tensor_parallel_degree > 1:
             dtype = sampled_token_ids.dtype
-            sampled_token_ids = sampled_token_ids.to("bfloat16")
+            sampled_token_ids = sampled_token_ids.to("float32")
             paddle.distributed.broadcast(sampled_token_ids, 0)
             sampled_token_ids = sampled_token_ids.to(dtype)
         if self.is_hpu_perf_breakdown_sync_mode:
