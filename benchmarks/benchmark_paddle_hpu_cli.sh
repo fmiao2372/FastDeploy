@@ -23,8 +23,8 @@ model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
 # model_log_name="ERNIE-4.5-300B-A47B-Paddle"
 # model_yaml="yaml/eb45-300b-a47b-32k-bf16.yaml"
 
-input_lengths=(128 1024)
-output_lengths=(128 1024)
+input_lengths=(1024 2048) 
+output_lengths=(1024)
 batch_sizes=(1 2 4 8 16 32 64 128)
 
 workspace=$(pwd)
@@ -33,11 +33,11 @@ log_home=$workspace/benchmark_fastdeploy_logs/$(TZ='Asia/Shanghai' date '+WW%V')
 
 mkdir -p ${log_home}
 
-for input_length in "${input_lengths[@]}"
+for batch_size in "${batch_sizes[@]}"
 do
-    for output_length in "${output_lengths[@]}"
+    for input_length in "${input_lengths[@]}"
     do
-        for batch_size in "${batch_sizes[@]}"
+        for output_length in "${output_lengths[@]}"
         do
             > log/hpu_model_runner_profile.log
             num_prompts=$(( batch_size * 3))
