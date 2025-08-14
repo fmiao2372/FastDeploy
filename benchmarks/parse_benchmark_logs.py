@@ -34,16 +34,20 @@ def parse_benchmark_log_file(filepath):
     return result
 
 def parse_profile_log_file(file_path):
+    prepare_input_times = []
     model_times = []
     postprocessing_times = []
     steppaddle_times = []
 
     with open(file_path, 'r') as file:
         for line in file:
+            prepare_input_match = re.search(r'_prepare_inputs time\(ms\): (\d+\.\d+)', line)
             model_match = re.search(r'Model execution time\(ms\): (\d+\.\d+)', line)
             postprocessing_match = re.search(r'PostProcessing execution time\(ms\): (\d+\.\d+)', line)
             steppaddle_match = re.search(r'StepPaddle execution time\(ms\): (\d+\.\d+)', line)
 
+            if prepare_input_match:
+                prepare_input_times.append(float(prepare_input_match.group(1)))
             if model_match:
                 model_times.append(float(model_match.group(1)))
             if postprocessing_match:
@@ -51,14 +55,17 @@ def parse_profile_log_file(file_path):
             if steppaddle_match:
                 steppaddle_times.append(float(steppaddle_match.group(1)))
 
-    return model_times, postprocessing_times, steppaddle_times
+    return prepare_input_times, model_times, postprocessing_times, steppaddle_times
 
-def calculate_times(times):
+def calculate_times(times, seperate_first):
     if len(times) < 2:
         return times[0], None
-    first_time = times[0]
-    average_time = sum(times[1:]) / len(times[1:])
-    return first_time, average_time
+    if seperate_first:
+        first_time = times[0]
+        average_time = sum(times[1:]) / len(times[1:])
+        return first_time, average_time
+    else:
+        return None, sum(times) / len(times)
 
 
 def main():
@@ -111,15 +118,15 @@ def main():
             profile_file = ''
         model_first = model_average = postprocessing_first = postprocessing_average = steppaddle_first = steppaddle_average = ''
         if profile_file in all_files:
-            model_times, postprocessing_times, steppaddle_times = parse_profile_log_file(os.path.join(log_dir, profile_file))
-            mf, ma = calculate_times(model_times)
-            pf, pa = calculate_times(postprocessing_times)
-            sf, sa = calculate_times(steppaddle_times)
+            prepare_input_times, model_times, postprocessing_times, steppaddle_times = parse_profile_log_file(os.path.join(log_dir, profile_file))
+            _, pia = calculate_times(prepare_input_times, False)
+            mf, ma = calculate_times(model_times, True)
+            _, pa = calculate_times(postprocessing_times, False)
+            _, sa = calculate_times(steppaddle_times, False)
+            prepare_input_average = pia if pia is not None else ''
             model_first = mf if mf is not None else ''
             model_average = ma if ma is not None else ''
-            postprocessing_first = pf if pf is not None else ''
             postprocessing_average = pa if pa is not None else ''
-            steppaddle_first = sf if sf is not None else ''
             steppaddle_average = sa if sa is not None else ''
         data = parse_benchmark_log_file(os.path.join(log_dir, file))
         data["dataset"] = "FixedRandom" if matched_idx == 0 else "ShareGPT"
@@ -128,11 +135,10 @@ def main():
         data["output_length"] = output_len
         data["batch_size"] = batch_size if matched_idx == 0 else max_concurrency
         data["num_prompts"] = num_prompts
+        data["prepare_input_average"] = prepare_input_average
         data["model_execute_first"] = model_first
         data["model_execute_average"] = model_average
-        data["postprocessing_execute_first"] = postprocessing_first
         data["postprocessing_execute_average"] = postprocessing_average
-        data["steppaddle_execute_first"] = steppaddle_first
         data["steppaddle_execute_average"] = steppaddle_average
         rows.append(data)
 
@@ -148,7 +154,7 @@ def main():
         csv_filename = f"benchmark_summary_{log_dir_name}_{ts}.csv"
     fieldnames = [
         "model_name", "dataset", "input_length", "output_length", "batch_size", "num_prompts", 
-        ] + [name for name, _ in metrics] + ["model_execute_first", "model_execute_average", "postprocessing_execute_first", "postprocessing_execute_average", "steppaddle_execute_first", "steppaddle_execute_average"]
+        ] + [name for name, _ in metrics] + ["prepare_input_average", "model_execute_first", "model_execute_average", "postprocessing_execute_average", "steppaddle_execute_average"]
     with open(csv_filename, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
