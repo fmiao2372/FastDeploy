@@ -1334,7 +1334,8 @@ class HPUModelRunner(ModelRunnerBase):
         # # 2. Padding inputs for cuda grph
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}")
+        real_bs = self.share_inputs["ids_remove_padding"].shape[0]
+        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}, BS={real_bs}")
         start_time = time.time()
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
