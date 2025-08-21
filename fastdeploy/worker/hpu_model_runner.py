@@ -1236,8 +1236,6 @@ class HPUModelRunner(ModelRunnerBase):
                     continue
                 if decode_block_num // decode_batch * self.parallel_config.block_size > warmup_max_model_len:
                     continue
-                if decode_block_num * self.parallel_config.block_size > self.parallel_config.max_num_batched_tokens:
-                    continue
                 blocks = [decode_block_num // decode_batch for _ in range(decode_batch)]
                 remain_block_num = decode_block_num % decode_batch
                 b = 0
@@ -1345,7 +1343,7 @@ class HPUModelRunner(ModelRunnerBase):
             model_output.cpu()
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}, BT={real_bs}")
+        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}, BT={real_bs}, block_list_shape={self.share_inputs['block_list'].shape}, block_indices_shape={self.share_inputs['block_indices'].shape}")
 
         start_time = time.time()
         start_time0 = time.time()
