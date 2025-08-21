@@ -1334,7 +1334,7 @@ class HPUModelRunner(ModelRunnerBase):
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
         real_bs = self.share_inputs["ids_remove_padding"].shape[0]
-        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}, BT={real_bs}, block_list_shape={self.share_inputs['block_list'].shape}, block_indices_shape={self.share_inputs['block_indices'].shape}")
+        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}, BT={real_bs}")
         start_time = time.time()
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
@@ -1343,7 +1343,7 @@ class HPUModelRunner(ModelRunnerBase):
             model_output.cpu()
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}, BT={real_bs}")
+        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}, BT={real_bs}, block_list_shape={self.share_inputs['block_list'].shape}, block_indices_shape={self.share_inputs['block_indices'].shape}")
 
         start_time = time.time()
         start_time0 = time.time()
