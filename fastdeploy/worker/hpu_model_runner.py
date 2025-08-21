@@ -162,6 +162,7 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int,
             share_inputs["next_tokens"],
             share_inputs["first_token_ids"]
         )
+        share_inputs["recover_lens"] = paddle.full([1], 0, dtype='int32').cpu()
 
 # TODO: replace rebuild_padding_v3 in CustomDevice if we adopt this version pp optimization
 def rebuild_padding_v3_1(
@@ -1335,7 +1336,7 @@ class HPUModelRunner(ModelRunnerBase):
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
         real_bs = self.share_inputs["ids_remove_padding"].shape[0]
-        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}, BS={real_bs}")
+        hpu_model_runner_profile_logger.info(f"_prepare_inputs time(ms): {execution_time}, BT={real_bs}")
         start_time = time.time()
         # # 3. Execute model
         model_output = self.model(self.share_inputs["ids_remove_padding"],
@@ -1344,7 +1345,7 @@ class HPUModelRunner(ModelRunnerBase):
             model_output.cpu()
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}")
+        hpu_model_runner_profile_logger.info(f"Model execution time(ms): {execution_time}, BT={real_bs}")
 
         start_time = time.time()
         start_time0 = time.time()
@@ -1357,13 +1358,13 @@ class HPUModelRunner(ModelRunnerBase):
         )
         end_time0 = time.time()
         execution_time0 = (end_time0 - start_time0) * 1000
-        hpu_model_runner_profile_logger.info(f"RebuildPadding execution time(ms): {execution_time0}")
+        hpu_model_runner_profile_logger.info(f"RebuildPadding execution time(ms): {execution_time0}, BT={real_bs}")
         # # 4. Compute logits, Sample
         start_time1 = time.time()
         logits = self.model.compute_logits(hiddden_states)
         end_time1 = time.time()
         execution_time1 = (end_time1 - start_time1) * 1000
-        hpu_model_runner_profile_logger.info(f"ComputeLogits execution time(ms): {execution_time1}")        
+        hpu_model_runner_profile_logger.info(f"ComputeLogits execution time(ms): {execution_time1}, BT={real_bs}")
         
         # data = np.random.rand(self.parallel_config.max_num_seqs, self.model_config.vocab_size).astype(np.float32)
         # logits = paddle.to_tensor(data, dtype='bfloat16')
@@ -1382,7 +1383,7 @@ class HPUModelRunner(ModelRunnerBase):
             sampled_token_ids.cpu()
         end_time2 = time.time()
         execution_time2 = (end_time2 - start_time2) * 1000
-        hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}") 
+        hpu_model_runner_profile_logger.info(f"Sampler execution time(ms): {execution_time2}, BT={real_bs}")
         # 5. Post Process
         start_time3 = time.time()
         model_output_data = ModelOutputData(
@@ -1421,10 +1422,10 @@ class HPUModelRunner(ModelRunnerBase):
                      model_output=model_output_data, is_warmuping=self.is_warmuping)
         end_time3 = time.time()
         execution_time3 = (end_time3 - start_time3) * 1000
-        hpu_model_runner_profile_logger.info(f"PostProcessHpu execution time(ms): {execution_time3}")         
+        hpu_model_runner_profile_logger.info(f"PostProcessHpu execution time(ms): {execution_time3}, BT={real_bs}")
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"PostProcessing execution time(ms): {execution_time}")
+        hpu_model_runner_profile_logger.info(f"PostProcessing execution time(ms): {execution_time}, BT={real_bs}")
 
         # 6. Speculative decode
         if self.speculative_decoding:
@@ -1441,7 +1442,7 @@ class HPUModelRunner(ModelRunnerBase):
                        self.parallel_config.max_model_len)
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000
-        hpu_model_runner_profile_logger.info(f"StepPaddle execution time(ms): {execution_time}")
+        hpu_model_runner_profile_logger.info(f"StepPaddle execution time(ms): {execution_time}, BT={real_bs}")
         self._update_chunked_prefill(model_forward_batch)
         self._add_cache(model_forward_batch)
 
