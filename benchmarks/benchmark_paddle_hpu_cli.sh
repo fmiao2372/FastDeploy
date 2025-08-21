@@ -22,6 +22,7 @@ model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
 # model="/data/disk3/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle"
 # model_log_name="ERNIE-4.5-300B-A47B-Paddle"
 # model_yaml="yaml/eb45-300b-a47b-32k-bf16.yaml"
+export SERVER_PORT=8188
 
 input_lengths=(1024 2048) 
 output_lengths=(1024)
@@ -33,11 +34,11 @@ log_home=$workspace/benchmark_fastdeploy_logs/$(TZ='Asia/Shanghai' date '+WW%V')
 
 mkdir -p ${log_home}
 
-for batch_size in "${batch_sizes[@]}"
+for input_length in "${input_lengths[@]}"
 do
-    for input_length in "${input_lengths[@]}"
+    for output_length in "${output_lengths[@]}"
     do
-        for output_length in "${output_lengths[@]}"
+        for batch_size in "${batch_sizes[@]}"
         do
             > log/hpu_model_runner_profile.log
             num_prompts=$(( batch_size * 3))
@@ -49,7 +50,7 @@ do
                 --model $model \
                 --endpoint /v1/chat/completions \
                 --host 0.0.0.0 \
-                --port 8188 \
+                --port ${SERVER_PORT} \
                 --dataset-name random \
                 --random-input-len ${input_length} \
                 --random-output-len ${output_length} \
@@ -67,3 +68,4 @@ do
         done
     done
 done
+mv log ${log_home}/
