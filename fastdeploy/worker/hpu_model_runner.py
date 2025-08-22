@@ -40,7 +40,7 @@ from fastdeploy.worker.forward_meta import ForwardMeta_HPU
 from fastdeploy.worker.model_runner_base import ModelRunnerBase
 from fastdeploy.worker.output import ModelOutputData, ModelRunnerOutput
 from fastdeploy.model_executor.ops.intel_hpu import (
-    save_output, step_paddle, recover_block, rebuild_padding_v2, update_inputs_v2)
+    save_output, step_paddle, recover_block, rebuild_padding_v2, update_inputs_v3)
 from fastdeploy.utils import get_logger
 
 hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_model_runner_profile.log")
@@ -48,11 +48,15 @@ hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_mo
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
                  model_output: ModelOutputData, is_warmuping: bool) -> None:
     """ Post-processing steps after completing a single token generation. """
-    start_time = time.time() 
-    update_inputs_v2(
+    start_time = time.time()
+
+    not_need_stop_hpu = model_output.not_need_stop.to(sampled_token_ids.place)
+    is_block_step_hpu = model_output.is_block_step.to(sampled_token_ids.place)
+
+    update_inputs_v3(
         model_output.stop_flags,
         model_output.step_idx,
-        model_output.not_need_stop,
+        not_need_stop_hpu,
         model_output.seq_lens_this_time,
         model_output.seq_lens_encoder,
         model_output.seq_lens_decoder,
@@ -60,13 +64,17 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
         model_output.input_ids,
         model_output.stop_nums,
         sampled_token_ids,
-        model_output.is_block_step,
+        is_block_step_hpu,
         model_output.eos_token_id,
         model_output.next_tokens,
     )
+
+    model_output.not_need_stop[:] = not_need_stop_hpu.cpu()
+    model_output.is_block_step[:] = is_block_step_hpu.cpu()
+
     end_time = time.time()
     execution_time = (end_time - start_time) * 1000
-    hpu_model_runner_profile_logger.info(f"post_process_hpu::update_inputs_v2 execution time(ms): {execution_time}") 
+    hpu_model_runner_profile_logger.info(f"post_process_hpu::update_inputs_v3 execution time(ms): {execution_time}")
 
     if is_warmuping:
         return
