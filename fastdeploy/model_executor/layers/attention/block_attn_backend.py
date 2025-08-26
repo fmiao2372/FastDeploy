@@ -177,6 +177,7 @@ class BlockAttentionBackend(AttentionBackend_HPU):
             o_proj.linear_weight,
             scaling_factor=self.head_dim**-0.5,
             causal=True,
+            softmax_mode=0,
         )
 
         if self.nranks > 1:
