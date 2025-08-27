@@ -18,3 +18,9 @@ In the script, you can use FLAGS_selected_intel_hpus to select hpu card.
 python parse_benchmark_logs.py benchmark_fastdeploy_logs/[the targeted folder]
 ```
 The performance data will be saved as a CSV file.
+
+## 4. analyse logs
+```python
+python draw.py benchmark_fastdeploy_logs/[the targeted folder]
+```
+The script will save the model execution times and batch tokens as a CSV file and plot them in a graph.
