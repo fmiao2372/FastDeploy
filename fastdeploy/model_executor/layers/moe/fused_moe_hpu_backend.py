@@ -142,6 +142,12 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         self.quant_fn = paddlenlp_ops.fused_quant
         self.moe_quant_type = "tensor_wise_fp8"
 
+        align_dummy = paddle.zeros([1], dtype=ffn1_weights[0].dtype)
+        padding_list = []
+        # align to 0x80 (128 bytes) / 2 (bf16) = 64, add 63 padding tensors
+        for j in range(63):
+            padding_list.append(align_dummy)
+
         for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
             weights_name = self.added_weight_attrs[idx]
             scales_name = self.added_scale_attrs[idx]
@@ -154,6 +160,7 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 quant_weight, scale = self.quant_fn(weights_tensor[i])
                 weights_list.append(quant_weight)
                 scales_list.append(scale)
+                scales_list.extend(padding_list)
 
             quanted_weight = paddle.stack(weights_list, axis=0)
             create_and_set_parameter(layer, weights_name, quanted_weight)
