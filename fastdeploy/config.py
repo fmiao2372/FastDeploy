@@ -152,6 +152,7 @@ class ParallelConfig:
     block_size = 16  # The block size for processing.
     sequence_parallel = False  # Whether to enable sequence parallelism.
     use_ep = False  # Whether to enable Expert Parallelism
+    use_tp_MoeEP = False  # Whether to enable nonMoE TP with MoE EP
     moe_phase = MoEPhase.PREFILL  # Generation phase
     msg_queue_id = 1  # mesage queue id
     tensor_parallel_rank = None  # TP rank ID

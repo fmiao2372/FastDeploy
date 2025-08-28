@@ -96,12 +96,18 @@ class PaddleDisWorkerProc():
             self.fd_config.moe_config.num_experts_start_offset = \
                 self.fd_config.parallel_config.expert_parallel_rank * self.fd_config.moe_config.num_experts_per_rank
 
+        if self.fd_config.parallel_config.use_tp_MoeEP:
+            self.fd_config.moe_config.num_experts_per_rank = \
+                self.fd_config.moe_config.num_experts // self.parallel_config.tensor_parallel_degree
+            self.fd_config.moe_config.num_experts_start_offset = \
+                self.fd_config.parallel_config.tensor_parallel_rank * self.fd_config.moe_config.num_experts_per_rank
+
         # For auto TP split
         self.fd_config.model_config.tensor_parallel_degree = self.parallel_config.tensor_parallel_degree
         self.fd_config.model_config.tensor_parallel_rank = self.parallel_config.tensor_parallel_rank
         self.fd_config.model_config.use_ep = self.parallel_config.use_ep
 
-        if self.fd_config.parallel_config.use_ep:
+        if self.fd_config.parallel_config.use_ep or self.fd_config.parallel_config.use_tp_MoeEP:
             self.fd_config.model_config.num_experts_per_rank = self.fd_config.moe_config.num_experts_per_rank
             self.fd_config.model_config.num_experts_start_offset = self.fd_config.moe_config.num_experts_start_offset
 
@@ -520,6 +526,9 @@ def parse_args():
     parser.add_argument("--enable_expert_parallell",
                         action='store_true',
                         help="enable expert parallell")
+    parser.add_argument("--enable_tensor_or_expert_parallel",
+                        action='store_true',
+                        help="enable tensor or expert parallell")
     parser.add_argument("--ori_vocab_size", type=int, default=None)
 
     parser.add_argument("--quantization",
@@ -634,6 +643,7 @@ def initialize_fd_config(args: argparse.Namespace) -> FDConfig:
     parallel_config.enable_prefix_caching = args.enable_prefix_caching
 
     parallel_config.use_ep = args.enable_expert_parallell
+    parallel_config.use_tp_MoeEP = args.enable_tensor_or_expert_parallel
     parallel_config.tensor_parallel_degree = args.tensor_parallel_size
     parallel_config.expert_parallel_degree = args.expert_parallel_size
     parallel_config.splitwise_role = args.splitwise_role

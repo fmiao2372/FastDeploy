@@ -67,9 +67,14 @@ class FusedMoE(nn.Layer):
         self.hidden_size = fd_config.model_config.hidden_size
         self.moe_config = fd_config.moe_config
         self.num_experts = num_experts
-        self.num_local_experts = self.num_experts // self.ep_size
 
-        self.moe_intermediate_size = moe_intermediate_size // self.tp_size
+        if fd_config.parallel_config.use_tp_MoeEP:
+            self.num_local_experts = self.num_experts // self.tp_size
+            self.moe_intermediate_size = moe_intermediate_size
+            expert_id_offset = fd_config.parallel_config.tensor_parallel_rank * self.num_local_experts
+        else:
+            self.num_local_experts = self.num_experts // self.ep_size
+            self.moe_intermediate_size = moe_intermediate_size // self.tp_size
 
         self.top_k = top_k
         self.weight_key_map = weight_key_map
@@ -111,10 +116,10 @@ class FusedMoE(nn.Layer):
             self.init_moe_weights()
 
         logger.info(
-            f"{moe_tag}MoE config is {num_experts=}[{expert_id_offset}, {expert_id_offset+self.num_local_experts}), \
-        {top_k=}, hidden_size={self.hidden_size}, {moe_intermediate_size=}, \
-            , ep_size={self.ep_size}, \
-            tp_size={self.tp_size}.")
+            f"{moe_tag}MoE config is {num_experts=}[{expert_id_offset}, {expert_id_offset+self.num_local_experts}),"
+            f"{top_k=}, hidden_size={self.hidden_size}, {moe_intermediate_size=}->{self.moe_intermediate_size} "
+            f"ep_size={self.ep_size}, "
+            f"tp_size={self.tp_size}.")
 
     def init_moe_weights(self):
         """

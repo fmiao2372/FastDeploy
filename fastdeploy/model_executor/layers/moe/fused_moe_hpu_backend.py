@@ -119,8 +119,8 @@ class HpuMoEMethod(MoEMethodBase):
                                        norm_topk_prob=True,
                                        permuted_weights=False,
                                        activation="silu",
-                                       experts_min=0,
-                                       experts_max=layer.num_experts - 1,)
+                                       experts_min=layer.expert_id_offset,
+                                       experts_max=layer.expert_id_offset+layer.num_local_experts-1,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce(fused_moe_out)

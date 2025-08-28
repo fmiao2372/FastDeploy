@@ -27,11 +27,20 @@ input_seq = None  # 1000
 max_out_tokens = 128
 server_max_bs = 128
 TP = 1
+enTPEP = True
 
 # num_gpu_blocks_override = ceil((input_seq + max_out_tokens) / 128) * server_max_bs
 num_gpu_blocks_override = 2000 
 sampling_params = SamplingParams(max_tokens=max_out_tokens)
-llm = LLM(model=model_name_or_path, tensor_parallel_size=TP, engine_worker_queue_port=8889, num_gpu_blocks_override=num_gpu_blocks_override, block_size=128, max_model_len=32768, max_num_seqs=server_max_bs)
+llm = LLM(model=model_name_or_path, \
+          tensor_parallel_size=TP, \
+		  enable_tensor_or_expert_parallel=enTPEP, \
+		  engine_worker_queue_port=8889, \
+		  num_gpu_blocks_override=num_gpu_blocks_override, \
+		  block_size=128, \
+		  max_model_len=32768, \
+		  max_num_seqs=server_max_bs, \
+		 )
 
 if input_seq == None:
     prompt = "user: who are you?"

@@ -443,6 +443,7 @@ class ParallelConfig:
         tensor_parallel_size: int = 1,
         data_parallel_size: int = 1,
         enable_expert_parallel: bool = False,
+        enable_tensor_or_expert_parallel: bool = False,
     ):
         """
         Initialize the ParallelConfig class.
@@ -452,10 +453,12 @@ class ParallelConfig:
             data_parallel_size (int): Size of data parallelism.
             local_data_parallel_id (int): ID of local data parallel.
             enable_expert_parallel (bool): Whether to enable expert parallel.
+            enable_tensor_or_expert_parallel (bool): Whether to enable tensor or expert parallel.
         """
         self.tensor_parallel_size = tensor_parallel_size
         self.data_parallel_size = data_parallel_size
         self.enable_expert_parallel = enable_expert_parallel
+        self.enable_tensor_or_expert_parallel = enable_tensor_or_expert_parallel
         self.expert_parallel_size = data_parallel_size
         self.local_data_parallel_id = 0
 
