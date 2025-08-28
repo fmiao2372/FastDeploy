@@ -255,8 +255,18 @@ class Sampler(nn.Layer):
 
         probs = F.softmax(logits)
 
-        _, next_tokens = paddle.tensor.top_p_sampling(probs,
-                                                      sampling_metadata.top_p)
+        use_cpu = False 
+        place = probs.place
+
+        if use_cpu and not place.is_cpu_place():
+            probs_cpu = probs.cpu()
+            top_p_cpu = sampling_metadata.top_p.cpu()
+            _, next_tokens = paddle.tensor.top_p_sampling(probs_cpu,
+                                                          top_p_cpu)
+            next_tokens = next_tokens.to(place)
+        else:
+            _, next_tokens = paddle.tensor.top_p_sampling(probs,
+                                                          sampling_metadata.top_p)
 
         if next_tokens.shape[0] != max_batch:
             dim = next_tokens.shape[-1]
