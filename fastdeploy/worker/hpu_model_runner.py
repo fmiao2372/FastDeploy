@@ -46,7 +46,8 @@ from fastdeploy.utils import get_logger
 hpu_model_runner_profile_logger = get_logger("hpu_model_runner_profile", "hpu_model_runner_profile.log")
 
 def post_process_hpu(sampled_token_ids: paddle.Tensor,
-                 model_output: ModelOutputData, is_warmuping: bool) -> None:
+                 model_output: ModelOutputData, is_warmuping: bool,
+                 batch_ids: paddle.Tensor) -> None:
     """ Post-processing steps after completing a single token generation. """
     start_time = time.time()
 
@@ -61,7 +62,6 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
         model_output.seq_lens_encoder,
         model_output.seq_lens_decoder,
         model_output.max_dec_len,
-        model_output.input_ids,
         model_output.stop_nums,
         sampled_token_ids,
         is_block_step_hpu,
@@ -72,6 +72,13 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
     model_output.not_need_stop[:] = not_need_stop_hpu.cpu()
     model_output.is_block_step[:] = is_block_step_hpu.cpu()
 
+    updated_token_ids = paddle.full_like(sampled_token_ids, -1)
+    for i in range(batch_ids.shape[0]):
+        idx = batch_ids[i].item()
+        model_output.input_ids[idx:idx+1, :1] = sampled_token_ids[idx:idx+1, :1]
+        updated_token_ids[idx:idx+1, :1] = sampled_token_ids[idx:idx+1, :1]
+
+
     end_time = time.time()
     execution_time = (end_time - start_time) * 1000
     hpu_model_runner_profile_logger.info(f"post_process_hpu::update_inputs_v3 execution time(ms): {execution_time}")
@@ -80,7 +87,7 @@ def post_process_hpu(sampled_token_ids: paddle.Tensor,
         return
     start_time = time.time()
     save_output(
-        sampled_token_ids,
+        updated_token_ids,
         model_output.not_need_stop,
         model_output.mp_rank,
     )
@@ -1069,7 +1076,8 @@ class HPUModelRunner(ModelRunnerBase):
                 if self.speculative_decoding else None)
 
             post_process_hpu(sampled_token_ids=sampled_token_ids,
-                     model_output=model_output_data, is_warmuping=self.is_warmuping)
+                     model_output=model_output_data, is_warmuping=self.is_warmuping,
+                     batch_ids=self.forward_meta.batch_ids)
 
             # 7. Updata 'infer_seed' and step_cuda()
             self.share_inputs["infer_seed"].add_(self.infer_seed_increment)
@@ -1425,7 +1433,8 @@ class HPUModelRunner(ModelRunnerBase):
         else:
             skip_save_output = False
         post_process_hpu(sampled_token_ids=sampled_token_ids,
-                     model_output=model_output_data, is_warmuping=self.is_warmuping)
+                     model_output=model_output_data, is_warmuping=self.is_warmuping,
+                     batch_ids=self.forward_meta.batch_ids)
         end_time3 = time.time()
         execution_time3 = (end_time3 - start_time3) * 1000
         hpu_model_runner_profile_logger.info(f"PostProcessHpu execution time(ms): {execution_time3}, BT={real_bs}")
