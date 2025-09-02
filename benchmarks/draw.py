@@ -89,6 +89,7 @@ def draw_time_graph(log_dir, log_filename, max_num_seqs, mode):
     plt.tight_layout()
     output_filename = log_filename[:-4] + '_analysis_' + mode + '.png'
     plt.savefig(os.path.join(log_dir, output_filename), dpi=300)
+    plt.close()
 
     # 写入CSV文件
     if mode == "all":
