@@ -18,7 +18,7 @@ import paddle
 from paddle import nn
 
 from fastdeploy.distributed.communication_op import \
-    tensor_model_parallel_all_reduce
+    tensor_model_parallel_all_reduce_custom
 from ..utils import create_and_set_parameter
 from .fused_moe_backend_base import MoEMethodBase
 
@@ -123,7 +123,7 @@ class HpuMoEMethod(MoEMethodBase):
                                        experts_max=layer.expert_id_offset+layer.num_local_experts-1,)
 
         if layer.reduce_results and layer.tp_size > 1:
-            tensor_model_parallel_all_reduce(fused_moe_out)
+            tensor_model_parallel_all_reduce_custom(fused_moe_out)
 
         return fused_moe_out
 
@@ -222,6 +222,6 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                                            experts_max=layer.num_experts - 1,)
 
         if layer.reduce_results and layer.tp_size > 1:
-            tensor_model_parallel_all_reduce(fused_moe_out)
+            tensor_model_parallel_all_reduce_custom(fused_moe_out)
 
         return fused_moe_out

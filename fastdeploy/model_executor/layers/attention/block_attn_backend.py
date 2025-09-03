@@ -182,8 +182,8 @@ class BlockAttentionBackend(AttentionBackend_HPU):
 
         if self.nranks > 1:
             from fastdeploy.distributed.communication_op import \
-                tensor_model_parallel_all_reduce
-            tensor_model_parallel_all_reduce(out_linear_out)
+                tensor_model_parallel_all_reduce_custom
+            tensor_model_parallel_all_reduce_custom(out_linear_out)
 
         return out_linear_out
 
@@ -223,6 +223,6 @@ class BlockAttentionBackend(AttentionBackend_HPU):
         # all_reduce
         if self.nranks > 1:
             from fastdeploy.distributed.communication_op import \
-                tensor_model_parallel_all_reduce
-            tensor_model_parallel_all_reduce(res)
+                tensor_model_parallel_all_reduce_custom
+            tensor_model_parallel_all_reduce_custom(res)
         return res
