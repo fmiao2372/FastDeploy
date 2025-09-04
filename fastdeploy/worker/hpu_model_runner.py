@@ -1200,8 +1200,7 @@ class HPUModelRunner(ModelRunnerBase):
             prefill_batchs.append(int(current_prefill_batch))
             current_prefill_batch += prefill_batch_step
 
-        # TODO: need identify if warmup really fails due to OOM.
-        max_prefill_length = self.parallel_config.block_size + (int(warmup_max_model_len / 2) if self.parallel_config.tensor_parallel_degree >= 8 else warmup_max_model_len)
+        max_prefill_length = self.parallel_config.block_size + warmup_max_model_len
         for prefill_batch in prefill_batchs:
             for prefill_length in range(self.parallel_config.block_size, max_prefill_length, self.parallel_config.block_size):
                 if prefill_length * prefill_batch > self.parallel_config.max_num_batched_tokens:
