@@ -7,9 +7,13 @@ export PADDLE_DISTRI_BACKEND=xccl
 export PADDLE_XCCL_BACKEND=intel_hpu
 # export FLAGS_selected_intel_hpus=0,1,2,3,4,5,6,7
 export FLAGS_selected_intel_hpus=0
-# export HABANA_PROFILE=1
+export HABANA_PROFILE=0
+export PROFILE_START=1
+export PROFILE_END=3
 # export HABANA_LOGS=hpu_logs
 # export LOG_LEVEL_ALL=0
+# export FLAGS_intel_hpu_runtime_debug=1
+# export FLAGS_intel_hpu_reciperunner_debug=1
 
 rm -rf log hpu_logs
 FD_ATTENTION_BACKEND=BLOCK_ATTN python offline_demo.py
