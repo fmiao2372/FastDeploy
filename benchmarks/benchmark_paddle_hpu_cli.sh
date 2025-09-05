@@ -23,6 +23,7 @@ model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
 # model_log_name="ERNIE-4.5-300B-A47B-Paddle"
 # model_yaml="yaml/eb45-300b-a47b-32k-bf16.yaml"
 export SERVER_PORT=8188
+export no_proxy=.intel.com,intel.com,localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,192.168.1.0/24
 
 input_lengths=(1024 2048) 
 output_lengths=(1024)

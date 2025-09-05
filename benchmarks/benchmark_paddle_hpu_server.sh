@@ -9,6 +9,7 @@ export FLAGS_intel_hpu_recipe_cache_num=20480
 export SERVER_PORT=8188
 export ENGINE_WORKER_QUEUE_PORT=8002
 export METRICS_PORT=8001
+export HABANA_PROFILE=0
 
 export FLAGS_selected_intel_hpus=0
 rm -rf log 2>/dev/null
