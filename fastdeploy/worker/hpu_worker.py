@@ -179,6 +179,9 @@ class HpuWorker(WorkerBase):
         """
         Perform the warm-up and the graph optimization
         """
+        # wait for all cards loading model completely.
+        if self.rank > 1:
+            paddle.distributed.barrier()
         # 1. Warm up model
         # NOTE(gongshaotian): may be not need warm_up at this place
         if int(os.environ.get("HPU_WARMUP_BUCKET", 0)) == 1:
