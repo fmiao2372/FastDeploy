@@ -222,6 +222,11 @@ class EngineArgs:
     Enable expert parallelism.
     """
 
+    enable_tensor_or_expert_parallel: bool = False
+    """
+    Enable tensor parallelism for non-MoE and expert parallelism for MoE.
+    """
+
     cache_transfer_protocol: str = "ipc"
     """
     Protocol to use for cache transfer.
@@ -664,7 +669,11 @@ class EngineArgs:
             default=EngineArgs.enable_expert_parallel,
             help="Enable expert parallelism.",
         )
-
+        parallel_group.add_argument(
+            "--enable-tensor-or-expert-parallel",
+            action='store_true',
+            default=EngineArgs.enable_tensor_or_expert_parallel,
+            help="Enable tensor parallelism for non-MoE and expert parallelism for MoE.")
         # Load group
         load_group = parser.add_argument_group("Load Configuration")
         load_group.add_argument(
@@ -1017,6 +1026,7 @@ class EngineArgs:
         cache_cfg = CacheConfig(all_dict)
         load_cfg = LoadConfig(all_dict)
         parallel_cfg = ParallelConfig(all_dict)
+        parallel_cfg.enc_dec_block_num = self.static_decode_blocks
         scheduler_cfg = self.create_scheduler_config()
         graph_opt_cfg = self.create_graph_optimization_config()
         graph_opt_cfg.update_use_cudagraph(self.use_cudagraph)

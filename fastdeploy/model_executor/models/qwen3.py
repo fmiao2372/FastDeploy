@@ -26,9 +26,9 @@ from paddleformers.utils.log import logger
 
 from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.forward_meta import ForwardMeta
-from fastdeploy.model_executor.graph_optimization.decorator import (
-    support_graph_optimization,
-)
+# from fastdeploy.model_executor.graph_optimization.decorator import (
+#     support_graph_optimization,
+# )
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
 from fastdeploy.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear
@@ -139,7 +139,7 @@ class Qwen3DecoderLayer(Qwen2DecoderLayer):
         self.self_attn = Qwen3Attention(fd_config=fd_config, layer_id=layer_id, prefix=f"{prefix}.self_attn")
 
 
-@support_graph_optimization
+# @support_graph_optimization
 class Qwen3Model(nn.Layer):
     """ """
 

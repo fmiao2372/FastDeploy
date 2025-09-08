@@ -26,9 +26,9 @@ from paddleformers.utils.log import logger
 
 from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.forward_meta import ForwardMeta
-from fastdeploy.model_executor.graph_optimization.decorator import (
-    support_graph_optimization,
-)
+# from fastdeploy.model_executor.graph_optimization.decorator import (
+#     support_graph_optimization,
+# )
 from fastdeploy.model_executor.layers.activation import SiluAndMul
 from fastdeploy.model_executor.layers.embeddings import VocabParallelEmbedding
 from fastdeploy.model_executor.layers.linear import (
@@ -238,7 +238,7 @@ class Qwen3DecoderLayer(nn.Layer):
         return hidden_states, residual
 
 
-@support_graph_optimization
+# @support_graph_optimization
 class Qwen3MoeModel(nn.Layer):
     """ """
 

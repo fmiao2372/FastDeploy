@@ -93,6 +93,10 @@ async def async_request_eb_openai_chat_completions(
                 "continuous_usage_stats": True,
             },
         }
+        # refer to EBChatDataset in benchmark_dataset.py. 12288 is the default max_tokens for variable output length 
+        if request_func_input.output_len > 0 and request_func_input.output_len != 12288:
+            payload["max_tokens"] = request_func_input.output_len
+            payload["min_tokens"] = request_func_input.output_len
         # 超参由yaml传入
         payload.update(request_func_input.hyper_parameters)
 

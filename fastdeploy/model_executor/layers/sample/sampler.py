@@ -209,6 +209,8 @@ class Sampler(nn.Layer):
             or current_platform.is_maca()
         ):
             self.forward = self.forward_cuda
+        elif current_platform.is_intel_hpu():
+            self.forward = self.forward_intel_hpu
         else:
             raise NotImplementedError
 
@@ -377,6 +379,62 @@ class Sampler(nn.Layer):
 
         return sampler_output
 
+    def forward_intel_hpu(
+        self,
+        logits: paddle.Tensor,
+        sampling_metadata: SamplingMetadata,
+        batch_ids: paddle.Tensor,
+        max_batch: int,
+    ) -> paddle.Tensor:
+        """
+        """
+
+        logits = paddle.cast(logits, paddle.float32)
+
+        from fastdeploy.model_executor.ops.intel_hpu import set_preids_token_penalty_multi_scores
+
+        set_preids_token_penalty_multi_scores(
+            sampling_metadata.pre_token_ids,
+            sampling_metadata.input_ids,
+            sampling_metadata.seq_lens_encoder,
+            sampling_metadata.seq_lens_decoder,
+            sampling_metadata.step_idx,
+            sampling_metadata.stop_flags,
+            logits,
+            sampling_metadata.repetition_penalties,
+            sampling_metadata.frequency_penalties,
+            sampling_metadata.presence_penalties,
+            sampling_metadata.temperature,
+            sampling_metadata.bad_words_token_ids,
+            sampling_metadata.step_idx,
+            sampling_metadata.min_dec_lens,
+            sampling_metadata.eos_token_ids,
+        )
+
+        probs = F.softmax(logits)
+
+        use_cpu = False 
+        place = probs.place
+
+        if use_cpu and not place.is_cpu_place():
+            probs_cpu = probs.cpu()
+            top_p_cpu = sampling_metadata.top_p.cpu()
+            _, next_tokens = paddle.tensor.top_p_sampling(probs_cpu,
+                                                          top_p_cpu)
+            next_tokens = next_tokens.to(place)
+        else:
+            _, next_tokens = paddle.tensor.top_p_sampling(probs,
+                                                          sampling_metadata.top_p)
+
+        if next_tokens.shape[0] != max_batch:
+            dim = next_tokens.shape[-1]
+            tmp_tokens = paddle.zeros((max_batch, dim), dtype=next_tokens.dtype)
+            tmp_tokens = paddle.scatter(
+                tmp_tokens, batch_ids, next_tokens[: batch_ids.shape[0], :]
+            )
+            return tmp_tokens
+
+        return next_tokens
 
 class SpeculativeSampler(nn.Layer):
     """
