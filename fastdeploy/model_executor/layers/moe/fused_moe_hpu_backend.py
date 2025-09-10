@@ -110,7 +110,7 @@ class HpuMoEMethod(MoEMethodBase):
         #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
         #     fused_moe_out = fused_moe_out / routing_weights_norm
         '''
-
+        chunk_size = 64
         from paddlenlp_ops import fused_gate_moe
         fused_moe_out = fused_gate_moe(x, gate_out, layer.gate_correction_bias,
                                        layer.moe_ffn1_weight,
@@ -120,7 +120,8 @@ class HpuMoEMethod(MoEMethodBase):
                                        permuted_weights=False,
                                        activation="silu",
                                        experts_min=layer.expert_id_offset,
-                                       experts_max=layer.expert_id_offset+layer.num_local_experts-1,)
+                                       experts_max=layer.expert_id_offset+layer.num_local_experts-1,
+                                       chunk_size=chunk_size,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce_custom(fused_moe_out)
