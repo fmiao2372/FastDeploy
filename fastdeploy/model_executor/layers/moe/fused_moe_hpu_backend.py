@@ -34,12 +34,19 @@ class HpuMoEMethod(MoEMethodBase):
         """
         # bf16
         ffn1_weights, ffn2_weights = layer.extract_moe_ffn_weights(state_dict)
-        stacked_ffn1_weights = paddle.stack(ffn1_weights, axis=0)
-        stacked_ffn2_weights = paddle.stack(ffn2_weights, axis=0)
-        for idx, weight_tensor in enumerate(
-            [stacked_ffn1_weights, stacked_ffn2_weights]):
-            weight_name = self.added_weight_attrs[idx]
-            create_and_set_parameter(layer, weight_name, weight_tensor)
+
+        for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
+            weights_list = []
+            for i in range(layer.num_local_experts):
+                weight_tensor = weights_tensor[i]
+                weight = layer.create_parameter(
+                    shape=weight_tensor.shape,
+                    dtype=weight_tensor.dtype,
+                    default_initializer=paddle.nn.initializer.Constant(0))
+                weight.set_value(weight_tensor)
+                weights_list.append(weight)
+            weights_name = self.added_weight_attrs[idx]
+            setattr(layer, weights_name, weights_list)
 
     def apply_ep_prefill(
         self,
@@ -143,12 +150,6 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         self.quant_fn = paddlenlp_ops.fused_quant
         self.moe_quant_type = "tensor_wise_fp8"
 
-        align_dummy = paddle.zeros([1], dtype=ffn1_weights[0].dtype)
-        padding_list = []
-        # align to 0x80 (128 bytes) / 2 (bf16) = 64, add 63 padding tensors
-        for j in range(63):
-            padding_list.append(align_dummy)
-
         for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
             weights_name = self.added_weight_attrs[idx]
             scales_name = self.added_scale_attrs[idx]
@@ -161,13 +162,9 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 quant_weight, scale = self.quant_fn(weights_tensor[i])
                 weights_list.append(quant_weight)
                 scales_list.append(scale)
-                scales_list.extend(padding_list)
 
-            quanted_weight = paddle.stack(weights_list, axis=0)
-            create_and_set_parameter(layer, weights_name, quanted_weight)
-
-            quanted_weight_scale = paddle.stack(scales_list, axis=0)
-            create_and_set_parameter(layer, scales_name, quanted_weight_scale)
+            setattr(layer, weights_name, weights_list)
+            setattr(layer, scales_name, scales_list)
 
 
     def apply_ep_prefill(
@@ -208,6 +205,7 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
+        chunk_size = 64
         from paddlenlp_ops import fused_gate_moe_fp8
         fused_moe_out = fused_gate_moe_fp8(x, gate_out, layer.gate_correction_bias,
                                            layer.moe_ffn1_weight,
@@ -219,8 +217,9 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                                            norm_topk_prob=True,
                                            permuted_weights=False,
                                            activation="silu",
-                                           experts_min=0,
-                                           experts_max=layer.num_experts - 1,)
+                                           experts_min=layer.expert_id_offset,
+                                           experts_max=layer.expert_id_offset+layer.num_local_experts-1,
+                                           chunk_size=chunk_size,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce_custom(fused_moe_out)
