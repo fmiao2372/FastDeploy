@@ -258,9 +258,9 @@ class LinearBase(nn.Layer):
         if self.fd_config.quant_config:
             linear_out = self.quant_method.apply(self, x)
         else:
-            linear_out = paddle.matmul(x, self.linear_weight)
+            linear_out = paddle.matmul(x, self.weight)
             if self.with_bias:
-                linear_out = paddle.add(linear_out, self.linear_bias)
+                linear_out = paddle.add(linear_out, self.bias)
 
         return linear_out
 
