@@ -240,9 +240,9 @@ def fused_mlp_forward(self, x):
     """
     out = fused_mlp(
         x,
-        self.gate_up_proj.linear_weight,
+        self.up_gate_proj.weight,
         None,
-        self.down_proj.linear_weight,
+        self.down_proj.weight,
     )
 
     # all_reduce
@@ -394,10 +394,11 @@ class HPUModelRunner(ModelRunnerBase):
         return self.guided_backend.get_logits_processor(
             schemata_key=schemata_key), schemata_key
 
-    def insert_prefill_inputs(self, req_dicts: List[Request]):
+    def insert_prefill_inputs(self, req_dicts: List[Request], num_running_requests: int = None):
         """
         Process inputs for prefill tasks and insert it to share_inputs buffer
-        TODO(gongshaotian): Refactor this func
+        req_dict: A list of Request dict
+        num_running_requests: batch_size
         """
         # NOTE(luotingdan): Lazy initialize kv cache
         if "caches" not in self.share_inputs:
@@ -454,7 +455,7 @@ class HPUModelRunner(ModelRunnerBase):
                                                    request.prompt_token_ids)
 
                 # Use chunked prefill
-                if self.parallel_config.enable_chunked_prefill:
+                if self.cache_config.enable_chunked_prefill:
                     request.set("chunk_idx", 1)
                     logger.info(
                         f"prefill_chunk_info: {request.prefill_chunk_info}")
@@ -538,7 +539,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["not_need_stop"][0] = True
 
         if self.speculative_method in ["mtp"]:
-            self.proposer.insert_prefill_inputs(req_dicts)
+            self.proposer.insert_prefill_inputs(req_dicts, num_running_requests)
 
     def _dummy_prefill_inputs(self, num_tokens: int, batch_size: int,
                               expected_decode_len: int):
@@ -876,7 +877,7 @@ class HPUModelRunner(ModelRunnerBase):
                 temperature=temperature,
                 top_p = top_p,
                 step_idx = step_idx,
-                prompt_token_ids = prompt_token_ids,
+                input_ids = prompt_token_ids,
                 pre_token_ids = pre_token_ids,
                 stop_flags = stop_flags,
                 seq_lens_encoder = seq_lens_encoder,
@@ -1084,7 +1085,7 @@ class HPUModelRunner(ModelRunnerBase):
         """
         更新chunked prefill相关参数
         """
-        if not self.parallel_config.enable_chunked_prefill:
+        if not self.cache_config.enable_chunked_prefill:
             return
 
         for task in tasks:
@@ -1517,9 +1518,7 @@ class HPUModelRunner(ModelRunnerBase):
         self.num_gpu_blocks = num_gpu_blocks
 
         # Reset block table and kv cache with global block num
-        if not (self.parallel_config.enable_prefix_caching \
-                or self.parallel_config.splitwise_role != "mixed"):
-            self.initialize_kv_cache()
+        self.initialize_kv_cache()
 
         # Reset free list
         free_list = list(
