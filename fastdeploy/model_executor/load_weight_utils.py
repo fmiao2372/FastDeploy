@@ -28,7 +28,7 @@ from paddleformers.utils.safetensors import fast_safe_open
 from safetensors import safe_open
 from tqdm import tqdm
 
-from fastdeploy.config import FDConfig, ParallelConfig
+from fastdeploy.config import FDConfig
 from fastdeploy.model_executor.models.tp_utils import (
     check_tensor_parallel_prerequisites,
 )

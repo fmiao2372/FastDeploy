@@ -132,7 +132,7 @@ class HpuWorker(WorkerBase):
         hpu_reserved_memory = 768 * one_mb  # 768MB reserved for not paddle use memory
         hpu_total_memory = 96 * one_gb  # 96GB HPU memory
         peak_memory = paddle_allocated_mem_after_run + hpu_reserved_memory
-        available_kv_cache_memory = hpu_total_memory * self.parallel_config.gpu_memory_utilization - peak_memory
+        available_kv_cache_memory = hpu_total_memory * self.cache_config.gpu_memory_utilization - peak_memory
 
 
         end_time = time.perf_counter()
@@ -155,7 +155,7 @@ class HpuWorker(WorkerBase):
         return self.model_runner.get_model()
 
     def initialize_cache(self, num_gpu_blocks: int) -> None:
-        """Initizlize the KV Cache with accurate num_gpu_blocks"""
+        """Initialize the KV Cache with accurate num_gpu_blocks"""
         # accurate cache size
         self.model_runner.update_share_input_block_num(num_gpu_blocks=num_gpu_blocks)
 
