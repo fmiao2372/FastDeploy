@@ -191,7 +191,6 @@ class SamplerProcessor:
         self.update_vocab_mask(skip_idx_list)
         # self.async_step = self.executor.submit(self.update_vocab_mask)
 
-
 class Sampler(nn.Layer):
     """
     Sampler for normal generation.
@@ -385,15 +384,15 @@ class Sampler(nn.Layer):
         sampling_metadata: SamplingMetadata,
         batch_ids: paddle.Tensor,
         max_batch: int,
+        rank: int,
+        local_rank: int,
     ) -> paddle.Tensor:
-        """
-        """
+        if logits.dtype != paddle.float32:
+            logits = paddle.cast(logits, paddle.float32)
 
-        logits = paddle.cast(logits, paddle.float32)
+        from fastdeploy.model_executor.ops.intel_hpu import fused_sampler
 
-        from fastdeploy.model_executor.ops.intel_hpu import set_preids_token_penalty_multi_scores
-
-        set_preids_token_penalty_multi_scores(
+        _, next_tokens = fused_sampler(
             sampling_metadata.pre_token_ids,
             sampling_metadata.prompt_ids,
             sampling_metadata.seq_lens_encoder,
@@ -409,22 +408,10 @@ class Sampler(nn.Layer):
             sampling_metadata.step_idx,
             sampling_metadata.min_dec_lens,
             sampling_metadata.eos_token_ids,
+            sampling_metadata.top_p,
+            rank,
+            local_rank,
         )
-
-        probs = F.softmax(logits)
-
-        use_cpu = False 
-        place = probs.place
-
-        if use_cpu and not place.is_cpu_place():
-            probs_cpu = probs.cpu()
-            top_p_cpu = sampling_metadata.top_p.cpu()
-            _, next_tokens = paddle.tensor.top_p_sampling(probs_cpu,
-                                                          top_p_cpu)
-            next_tokens = next_tokens.to(place)
-        else:
-            _, next_tokens = paddle.tensor.top_p_sampling(probs,
-                                                          sampling_metadata.top_p)
 
         if next_tokens.shape[0] != max_batch:
             dim = next_tokens.shape[-1]
