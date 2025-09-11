@@ -35,9 +35,9 @@ from fastdeploy.model_executor.models.tp_utils import (
 from fastdeploy.platforms import current_platform
 
 def reload_ep_checkpoint(model_path: str,
-                       config: ParallelConfig,
-                       state_dict: dict,
-                       return_numpy: bool = False):
+                         fd_config: FDConfig,
+                         state_dict: dict,
+                         return_numpy: bool = False):
     """
     load ep checkpoint
     """
@@ -54,10 +54,10 @@ def reload_ep_checkpoint(model_path: str,
     num_local_ffn_keys = []
     reloaded_map = {}
 
-    for i in range(config.moe_layer_start_index, config.num_layers):
+    for i in range(fd_config.model_config.moe_layer_start_index, fd_config.model_config.num_hidden_layers):
         for j in range(
-                config.num_experts_start_offset,
-                config.num_experts_start_offset + config.num_experts_per_rank,
+                fd_config.parallel_config.num_experts_start_offset,
+                fd_config.parallel_config.num_experts_start_offset + fd_config.parallel_config.num_experts_per_rank,
         ):
             ffn1_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.weight"
             ffn2_key = (f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight")
@@ -418,12 +418,12 @@ def load_composite_checkpoint(
                 fd_config.parallel_config.tensor_parallel_size > 1:
                 state_dict = load_tp_checkpoint(model_path,
                                                 cls,
-                                                fd_config.parallel_config,
+                                                fd_config.model_config.pretrained_config,
                                                 return_numpy=return_numpy)
                 state_dict = reload_ep_checkpoint(model_path,
-                                                 fd_config.parallel_config,
-                                                 state_dict,
-                                                 return_numpy=True)
+                                                  fd_config,
+                                                  state_dict,
+                                                  return_numpy=True)
             else:
                 # NOTE: for very big model, cpu will be out of memory
                 state_dict = load_tp_checkpoint(
