@@ -332,10 +332,12 @@ class RandomDataset(BenchmarkDataset):
         **kwargs,
     ) -> list[SampleRequest]:
         requests = []
+        cnt = 1
         for i in range(num_requests):
             prompt = "hi" * (input_len - 7) # For Ernie-4.5-21B
             requests.append(
                 SampleRequest(
+                    no=cnt,
                     prompt=prompt,
                     prompt_len=input_len,
                     history_QA=[{
@@ -346,4 +348,5 @@ class RandomDataset(BenchmarkDataset):
                     expected_output_len=output_len,
                 )
             )
+            cnt += 1
         return requests
