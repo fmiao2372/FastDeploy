@@ -1032,7 +1032,9 @@ class HPUModelRunner(ModelRunnerBase):
             sampled_token_ids = self.sampler(logits,
                                              self.sampling_metadata,
                                              self.forward_meta.batch_ids,
-                                             self.forward_meta.seq_lens_encoder.shape[0])
+                                             self.forward_meta.seq_lens_encoder.shape[0],
+                                             self.rank,
+                                             self.local_rank)
             if self.parallel_config.tensor_parallel_degree > 1:
                 dtype = sampled_token_ids.dtype
                 sampled_token_ids = sampled_token_ids.to("float32")
@@ -1379,7 +1381,10 @@ class HPUModelRunner(ModelRunnerBase):
         sampled_token_ids = self.sampler(logits,
                                          self.sampling_metadata,
                                          self.forward_meta.batch_ids,
-                                         self.forward_meta.seq_lens_encoder.shape[0])
+                                         self.forward_meta.seq_lens_encoder.shape[0],
+                                         self.rank,
+                                         self.local_rank,
+                                        )
         if self.parallel_config.tensor_parallel_degree > 1:
             dtype = sampled_token_ids.dtype
             sampled_token_ids = sampled_token_ids.to("float32")
