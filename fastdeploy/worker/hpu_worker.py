@@ -24,7 +24,7 @@ from paddle.base import core
 
 from fastdeploy.config import FDConfig
 from fastdeploy.engine.request import Request
-from fastdeploy.utils import get_logger
+from fastdeploy.utils import get_logger, set_random_seed
 from fastdeploy.worker.hpu_model_runner import HPUModelRunner
 from fastdeploy.worker.output import ModelRunnerOutput
 from fastdeploy.worker.worker_base import WorkerBase
@@ -44,8 +44,6 @@ def reset_max_memory_reserved(device_id: int) -> None:
     core.device_memory_stat_reset_peak_value("Reserved", device_id)
 
 class HpuWorker(WorkerBase):
-    """ """
-
     def __init__(
         self,
         fd_config: FDConfig,
@@ -60,10 +58,11 @@ class HpuWorker(WorkerBase):
         pass
 
     def init_device(self):
-        """ Initialize device and Construct model runner
+        """
+        Initialize device and construct model runner
         """
         if paddle.is_compiled_with_custom_device("intel_hpu"):
-            # Set evironment variable
+            # Set environment variable
             self.device_ids = self.parallel_config.device_ids.split(",")
             logger.info(f"Using Intel HPU device with local rank => device id: {int(self.device_ids[self.local_rank])} as module id")
             intel_hpus_module_id = int(self.device_ids[self.local_rank])   
@@ -74,9 +73,9 @@ class HpuWorker(WorkerBase):
             gc.collect()
             paddle.device.cuda.empty_cache()
         else:
-            raise RuntimeError(
-                f"Not support device type: {self.device_config.device}")
+            raise RuntimeError(f"Not support device type: {self.device_config.device}")
 
+        set_random_seed(self.fd_config.model_config.seed)
         # Construct model runner
         self.model_runner: HPUModelRunner = HPUModelRunner(
             fd_config=self.fd_config,
@@ -148,11 +147,11 @@ class HpuWorker(WorkerBase):
         return available_kv_cache_memory  # return to caculate the block num in this device
 
     def load_model(self) -> None:
-        """ """
+        """Load model"""
         self.model_runner.load_model()
 
     def get_model(self) -> nn.Layer:
-        """ """
+        """Get current model"""
         return self.model_runner.get_model()
 
     def initialize_cache(self, num_gpu_blocks: int) -> None:
@@ -201,10 +200,5 @@ class HpuWorker(WorkerBase):
         return True
 
     def cal_theortical_kvcache(self) -> int:
-        """ """
+        """Calculate the block memory required"""
         return self.model_runner.cal_theortical_kvcache()
-
-    def reinitialize_kv_cache(self, num_gpu_blocks: int) -> None:
-        """ """
-        self.model_runner.update_share_input_block_num(
-            num_gpu_blocks=num_gpu_blocks)

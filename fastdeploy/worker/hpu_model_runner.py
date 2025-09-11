@@ -829,7 +829,7 @@ class HPUModelRunner(ModelRunnerBase):
                 temperature=self.share_inputs["temperature"],
                 top_p = self.share_inputs["top_p"],
                 step_idx = self.share_inputs["step_idx"],
-                input_ids = self.share_inputs["input_ids"],
+                prompt_ids = self.share_inputs["input_ids"],
                 pre_token_ids = self.share_inputs["pre_ids"],
                 stop_flags = self.share_inputs["stop_flags"],
                 seq_lens_encoder = self.share_inputs["seq_lens_encoder"],
@@ -877,7 +877,7 @@ class HPUModelRunner(ModelRunnerBase):
                 temperature=temperature,
                 top_p = top_p,
                 step_idx = step_idx,
-                input_ids = prompt_token_ids,
+                prompt_ids = prompt_token_ids,
                 pre_token_ids = pre_token_ids,
                 stop_flags = stop_flags,
                 seq_lens_encoder = seq_lens_encoder,
@@ -1455,7 +1455,6 @@ class HPUModelRunner(ModelRunnerBase):
 
         if int(os.environ.get("HABANA_PROFILE", 0)) == 1:
             self.prof.step()
-        logger.info(f"not need stop: {self.share_inputs['not_need_stop'][0]}")
         return None
 
     def _add_cache(self, model_forward_batch) -> None:

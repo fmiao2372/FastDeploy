@@ -11,11 +11,11 @@ export ENGINE_WORKER_QUEUE_PORT=8002
 export METRICS_PORT=8001
 export HABANA_PROFILE=0
 
-export FLAGS_selected_intel_hpus=4
+export FLAGS_selected_intel_hpus=0
 rm -rf log 2>/dev/null
-HPU_PERF_BREAKDOWN_SYNC_MODE=1 HPU_WARMUP_BUCKET=1 HPU_WARMUP_MODEL_LEN=4096 FD_ATTENTION_BACKEND=HPU_ATTN python -m fastdeploy.entrypoints.openai.api_server --model /data/disk3/ernie_opensource/ERNIE-4.5-21B-A3B-Paddle --port ${SERVER_PORT} --engine-worker-queue-port ${ENGINE_WORKER_QUEUE_PORT} --metrics-port ${METRICS_PORT} --tensor-parallel-size 1 --max-model-len 32768 --max-num-seqs 128 --block-size 128
+HPU_PERF_BREAKDOWN_SYNC_MODE=1 HPU_WARMUP_BUCKET=1 HPU_WARMUP_MODEL_LEN=4096 FD_ATTENTION_BACKEND=HPU_ATTN python -m fastdeploy.entrypoints.openai.api_server --model /data/disk3/ernie_opensource/ERNIE-4.5-21B-A3B-Paddle --port ${SERVER_PORT} --engine-worker-queue-port ${ENGINE_WORKER_QUEUE_PORT} --metrics-port ${METRICS_PORT} --tensor-parallel-size 1 --max-model-len 32768 --max-num-seqs 128 --block-size 128 --static-decode-blocks 8 --num-gpu-blocks-override 3100 --kv-cache-ratio 0.991
 
 # (2k + 1k) / 128(block_size) * 128(batch) = 3072
 # export FLAGS_selected_intel_hpus=0,1,2,3,4,5,6,7
 # rm -rf log 2>/dev/null
-# HPU_PERF_BREAKDOWN_SYNC_MODE=1 HPU_WARMUP_BUCKET=1 HPU_WARMUP_MODEL_LEN=3072 FD_ATTENTION_BACKEND=HPU_ATTN python -m fastdeploy.entrypoints.openai.api_server --model /data/disk3/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle --port ${SERVER_PORT} --engine-worker-queue-port ${ENGINE_WORKER_QUEUE_PORT} --metrics-port ${METRICS_PORT} --tensor-parallel-size 8 --max-model-len 32768 --max-num-seqs 128 --block-size 128 --static-decode-blocks 8 --num-gpu-blocks-override 3100 --kv-cache-ratio 0.991 --enable-tensor-or-expert-parallel
+# HPU_PERF_BREAKDOWN_SYNC_MODE=1 HPU_WARMUP_BUCKET=1 HPU_WARMUP_MODEL_LEN=3072 FD_ATTENTION_BACKEND=HPU_ATTN python -m fastdeploy.entrypoints.openai.api_server --model /data/disk3/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle --port ${SERVER_PORT} --engine-worker-queue-port ${ENGINE_WORKER_QUEUE_PORT} --metrics-port ${METRICS_PORT} --tensor-parallel-size 8 --max-model-len 32768 --max-num-seqs 128 --block-size 128 --static-decode-blocks 8 --num-gpu-blocks-override 3100 --kv-cache-ratio 0.991

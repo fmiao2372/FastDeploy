@@ -32,7 +32,6 @@ from fastdeploy.model_executor.layers.attention.base_attention_backend import (
     AttentionBackend_HPU, AttentionMetadata)
 from fastdeploy.model_executor.layers.linear import (
     QKVParallelLinear, RowParallelLinear)
-from fastdeploy.model_executor.forward_meta import ForwardMeta_HPU
 
 @dataclass
 class HPUAttentionMetadata(AttentionMetadata):
@@ -102,7 +101,7 @@ class HPUAttentionBackend(AttentionBackend_HPU):
             os.getenv("FLAGS_use_pd_disaggregation", 0))
         self.start_layer_index = llm_config.model_config.start_layer_index
 
-    def init_attention_metadata(self, forward_meta: ForwardMeta_HPU):
+    def init_attention_metadata(self, forward_meta):
         """Initialize attntion metadata hence all layers in the forward pass can reuse it."""
         metadata = HPUAttentionMetadata()
         metadata.encoder_block_shape_q = 64
@@ -141,7 +140,7 @@ class HPUAttentionBackend(AttentionBackend_HPU):
         qkv_proj: QKVParallelLinear,
         o_proj: RowParallelLinear,
         layer: Attention,
-        forward_meta: ForwardMeta_HPU,
+        forward_meta
     ):
         """
         forward_extend
@@ -193,7 +192,7 @@ class HPUAttentionBackend(AttentionBackend_HPU):
         qkv_proj: QKVParallelLinear,
         o_proj: RowParallelLinear,
         layer: Attention,
-        forward_meta: ForwardMeta_HPU,
+        forward_meta
     ):
         """
         forward_decode

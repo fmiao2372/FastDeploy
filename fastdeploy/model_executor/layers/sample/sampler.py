@@ -395,7 +395,7 @@ class Sampler(nn.Layer):
 
         set_preids_token_penalty_multi_scores(
             sampling_metadata.pre_token_ids,
-            sampling_metadata.input_ids,
+            sampling_metadata.prompt_ids,
             sampling_metadata.seq_lens_encoder,
             sampling_metadata.seq_lens_decoder,
             sampling_metadata.step_idx,

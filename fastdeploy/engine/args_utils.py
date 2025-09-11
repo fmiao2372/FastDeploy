@@ -1026,7 +1026,7 @@ class EngineArgs:
         cache_cfg = CacheConfig(all_dict)
         load_cfg = LoadConfig(all_dict)
         parallel_cfg = ParallelConfig(all_dict)
-        parallel_cfg.enc_dec_block_num = self.static_decode_blocks
+        cache_cfg.enc_dec_block_num = self.static_decode_blocks
         scheduler_cfg = self.create_scheduler_config()
         graph_opt_cfg = self.create_graph_optimization_config()
         graph_opt_cfg.update_use_cudagraph(self.use_cudagraph)

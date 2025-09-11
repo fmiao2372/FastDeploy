@@ -16,7 +16,7 @@
 
 # set -x
 
-model="/data/disk2/ERNIE-4.5-21B-A3B-Paddle"
+model="/data/disk3/ernie_opensource/ERNIE-4.5-21B-A3B-Paddle"
 model_log_name="ERNIE-4.5-21B-A3B-Paddle"
 model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
 # model="/data/disk3/ernie_opensource/ERNIE-4.5-300B-A47B-Paddle"
