@@ -31,7 +31,7 @@ class HpuMoEMethod(MoEMethodBase):
     def create_weights(self, layer: nn.Layer, **extra_weight_attrs):
         # TODO: split create_parameter from process_loaded_weights
         return NotImplemented
-    
+
     def process_loaded_weights(self, layer: nn.Layer, state_dict):
         """
         Paddle HPU load weight process.
@@ -121,21 +121,21 @@ class HpuMoEMethod(MoEMethodBase):
         #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
         #     fused_moe_out = fused_moe_out / routing_weights_norm
         '''
-
+        chunk_size = 64
         from paddlenlp_ops import fused_gate_moe
 
         # TODO: fuse matmul to gate_moe
         gate_out = paddle.matmul(x.cast("float32"), gate.weight)
         fused_moe_out = fused_gate_moe(x, gate_out, layer.gate_correction_bias,
-                           layer.up_gate_proj_weight,
-                           layer.down_proj_weight,
-                           layer.top_k, layer.moe_use_gate_correction_bias,
-                           norm_topk_prob=True,
-                           permuted_weights=False,
-                           activation="silu",
-                           experts_min=layer.expert_id_offset,
-                           experts_max=layer.expert_id_offset+layer.num_local_experts-1,)
-
+                                       layer.up_gate_proj_weight,
+                                       layer.down_proj_weight,
+                                       layer.top_k, layer.moe_use_gate_correction_bias,
+                                       norm_topk_prob=True,
+                                       permuted_weights=False,
+                                       activation="silu",
+                                       experts_min=layer.expert_id_offset,
+                                       experts_max=layer.expert_id_offset+layer.num_local_experts-1,
+                                       chunk_size=chunk_size,)
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce_custom(fused_moe_out)
 
@@ -148,21 +148,23 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
     This method is the oldest way to compute MoE in Paddle.
     """
 
-    def create_weights(self, layer: nn.Layer, state_dict):
+    def create_weights(self, layer: nn.Layer, **extra_weight_attrs):
+        # TODO: split create_parameter from process_loaded_weights
+        return NotImplemented
+
+    def process_loaded_weights(self, layer: nn.Layer, state_dict):
+        """
+        Paddle HPU load weight process.
+        """
         # bf16
-        ffn1_weights, ffn2_weights = layer.extract_moe_ffn_weights(state_dict)
+        up_gate_proj_weights, down_proj_weights, _, _ = layer.extract_moe_ffn_weights(state_dict)
+
 
         import paddlenlp_ops
         self.quant_fn = paddlenlp_ops.fused_quant
         self.moe_quant_type = "tensor_wise_fp8"
 
-        align_dummy = paddle.zeros([1], dtype=ffn1_weights[0].dtype)
-        padding_list = []
-        # align to 0x80 (128 bytes) / 2 (bf16) = 64, add 63 padding tensors
-        for j in range(63):
-            padding_list.append(align_dummy)
-
-        for idx, weights_tensor in enumerate([ffn1_weights, ffn2_weights]):
+        for idx, weights_tensor in enumerate([up_gate_proj_weights, down_proj_weights]):
             weights_name = self.added_weight_attrs[idx]
             scales_name = self.added_scale_attrs[idx]
 
@@ -174,14 +176,9 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 quant_weight, scale = self.quant_fn(weights_tensor[i])
                 weights_list.append(quant_weight)
                 scales_list.append(scale)
-                scales_list.extend(padding_list)
 
-            quanted_weight = paddle.stack(weights_list, axis=0)
-            create_and_set_parameter(layer, weights_name, quanted_weight)
-
-            quanted_weight_scale = paddle.stack(scales_list, axis=0)
-            create_and_set_parameter(layer, scales_name, quanted_weight_scale)
-
+            setattr(layer, weights_name, weights_list)
+            setattr(layer, scales_name, scales_list)
 
     def apply_ep_prefill(
         self,
@@ -211,7 +208,7 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         self,
         layer: nn.Layer,
         x: paddle.Tensor,
-        gate_out: paddle.Tensor,
+        gate: nn.Layer,
     ) -> paddle.Tensor:
         """
         Paddle hpu Fused MoE.
@@ -221,7 +218,10 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
+        chunk_size = 64
         from paddlenlp_ops import fused_gate_moe_fp8
+        # TODO: fuse matmul to gate_moe
+        gate_out = paddle.matmul(x.cast("float32"), gate.weight)
         fused_moe_out = fused_gate_moe_fp8(x, gate_out, layer.gate_correction_bias,
                                            layer.up_gate_proj_weight,
                                            layer.down_proj_weight,
@@ -233,7 +233,8 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                                            permuted_weights=False,
                                            activation="silu",
                                            experts_min=layer.expert_id_offset,
-                                           experts_max=layer.expert_id_offset+layer.num_local_experts-1,)
+                                           experts_max=layer.expert_id_offset+layer.num_local_experts-1,
+                                           chunk_size=chunk_size,)
 
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce_custom(fused_moe_out)
