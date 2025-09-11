@@ -352,7 +352,7 @@ class HPUModelRunner(ModelRunnerBase):
                 on_trace_ready = profiler.export_chrome_tracing('./profile'))
             self.prof.start()
 
-    def prefill_finished(self):
+    def exist_prefill(self):
         """
         check whether prefill stage finished
         """
@@ -1455,6 +1455,7 @@ class HPUModelRunner(ModelRunnerBase):
 
         if int(os.environ.get("HABANA_PROFILE", 0)) == 1:
             self.prof.step()
+        logger.info(f"not need stop: {self.share_inputs['not_need_stop'][0]}")
         return None
 
     def _add_cache(self, model_forward_batch) -> None:
