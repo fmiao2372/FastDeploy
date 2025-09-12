@@ -315,3 +315,38 @@ class EBChatDataset(BenchmarkDataset):
 
         self.maybe_oversample_requests(samples, num_requests)
         return samples
+
+class RandomDataset(BenchmarkDataset):
+
+    def __init__(
+        self,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+
+    def sample(
+        self,
+        num_requests: int,
+        input_len: int = 1024,
+        output_len: int = 1024,
+        **kwargs,
+    ) -> list[SampleRequest]:
+        requests = []
+        cnt = 1
+        for i in range(num_requests):
+            prompt = "hi" * (input_len - 7) # For Ernie-4.5-21B
+            requests.append(
+                SampleRequest(
+                    no=cnt,
+                    prompt=prompt,
+                    prompt_len=input_len,
+                    history_QA=[{
+                    'role': 'user',
+                    'content': prompt
+                    }],
+                    json_data=None,
+                    expected_output_len=output_len,
+                )
+            )
+            cnt += 1
+        return requests
