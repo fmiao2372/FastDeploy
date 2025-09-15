@@ -122,7 +122,7 @@ class HpuMoEMethod(MoEMethodBase):
         #     fused_moe_out = fused_moe_out / routing_weights_norm
         '''
         chunk_size = 64
-        from paddlenlp_ops import fused_gate_moe
+        from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe
 
         # TODO: fuse matmul to gate_moe
         gate_out = paddle.matmul(x.cast("float32"), gate.weight)
@@ -219,7 +219,7 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
 
         chunk_size = 64
-        from paddlenlp_ops import fused_gate_moe_fp8
+        from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe_fp8
         # TODO: fuse matmul to gate_moe
         gate_out = paddle.matmul(x.cast("float32"), gate.weight)
         fused_moe_out = fused_gate_moe_fp8(x, gate_out, layer.gate_correction_bias,

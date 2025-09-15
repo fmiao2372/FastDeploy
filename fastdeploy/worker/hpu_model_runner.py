@@ -783,7 +783,7 @@ class HPUModelRunner(ModelRunnerBase):
 
     def _prepare_inputs(self) -> None:
         """ prepare the model inputs """
-        from paddlenlp_ops import prepare_block_metadata
+        from fastdeploy.model_executor.ops.intel_hpu import prepare_block_metadata
         (
             ids_remove_padding,
             rotary_embs,
@@ -842,7 +842,7 @@ class HPUModelRunner(ModelRunnerBase):
                 eos_token_ids = self.share_inputs["eos_token_id"],
             )
         else:
-            from paddlenlp_ops import fused_index_select
+            from fastdeploy.model_executor.ops.intel_hpu import fused_index_select
             (
                 temperature,
                 top_p,

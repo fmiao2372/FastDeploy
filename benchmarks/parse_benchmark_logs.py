@@ -129,7 +129,7 @@ def main():
             postprocessing_average = pa if pa is not None else ''
             steppaddle_average = sa if sa is not None else ''
         data = parse_benchmark_log_file(os.path.join(log_dir, file))
-        data["dataset"] = "FixedRandom" if matched_idx == 0 else "ShareGPT"
+        data["dataset"] = "Fixed-Length" if matched_idx == 0 else "ShareGPT"
         data["model_name"] = model_name
         data["input_length"] = input_len
         data["output_length"] = output_len

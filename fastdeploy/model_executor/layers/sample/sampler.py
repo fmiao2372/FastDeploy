@@ -191,6 +191,7 @@ class SamplerProcessor:
         self.update_vocab_mask(skip_idx_list)
         # self.async_step = self.executor.submit(self.update_vocab_mask)
 
+
 class Sampler(nn.Layer):
     """
     Sampler for normal generation.

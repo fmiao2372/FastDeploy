@@ -3,8 +3,8 @@
 在环境满足如下条件前提下
 
 - Python 3.10
-- Intel Gaudi 2 and 3 AI accelerators
-- Intel Gaudi software version 1.22.0 and above
+- Intel Gaudi 2
+- Intel Gaudi software version 1.22.0
 - Linux X86_64
 
 ### 1. 运行Docker容器
@@ -52,7 +52,7 @@ export GC_KERNEL_PATH=/usr/local/lib/python3.10/dist-packages/paddle_custom_devi
 export INTEL_HPU_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export PADDLE_DISTRI_BACKEND=xccl
 export PADDLE_XCCL_BACKEND=intel_hpu
-export FLAGS_selected_intel_hpus=0
+export HPU_VISIBLE_DEVICES=0
 
 HPU_WARMUP_BUCKET=1 HPU_WARMUP_MODEL_LEN=4096 FD_ATTENTION_BACKEND=HPU_ATTN python -m fastdeploy.entrypoints.openai.api_server --model ERNIE-4.5-21B-A3B-Paddle --tensor-parallel-size 1 --max-model-len 32768 --max-num-seqs 128
 ```

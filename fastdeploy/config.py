@@ -1221,7 +1221,7 @@ class FDConfig:
         if current_platform.is_xpu():
             self.device_ids = os.getenv("XPU_VISIBLE_DEVICES", self.device_ids)
         if current_platform.is_intel_hpu():
-            self.device_ids = os.getenv("FLAGS_selected_intel_hpus", self.device_ids)
+            self.device_ids = os.getenv("HPU_VISIBLE_DEVICES", self.device_ids)
 
         self.read_from_config()
         self.postprocess()
