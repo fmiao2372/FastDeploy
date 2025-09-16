@@ -160,8 +160,8 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         up_gate_proj_weights, down_proj_weights, _, _ = layer.extract_moe_ffn_weights(state_dict)
 
 
-        import paddlenlp_ops
-        self.quant_fn = paddlenlp_ops.fused_quant
+        from fastdeploy.model_executor.ops.intel_hpu import fused_quant
+        self.quant_fn = fused_quant
         self.moe_quant_type = "tensor_wise_fp8"
 
         for idx, weights_tensor in enumerate([up_gate_proj_weights, down_proj_weights]):
