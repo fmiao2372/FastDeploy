@@ -269,6 +269,7 @@ def fused_mlp_forward(self, x):
 
 import types
 
+from fastdeploy.distributed.communication import tensor_model_parallel_all_reduce_custom
 from fastdeploy.model_executor.layers.attention.attention import Attention
 from fastdeploy.model_executor.models.ernie4_5_moe import (
     Ernie4_5_Attention,
@@ -946,7 +947,7 @@ class HPUModelRunner(ModelRunnerBase):
             if self.parallel_config.tensor_parallel_size > 1:
                 dtype = sampled_token_ids.dtype
                 sampled_token_ids = sampled_token_ids.to("float32")
-                paddle.distributed.broadcast(sampled_token_ids, 0)
+                tensor_model_parallel_all_reduce_custom(sampled_token_ids)
                 sampled_token_ids = sampled_token_ids.to(dtype)
 
             # 6. post process
@@ -1276,7 +1277,7 @@ class HPUModelRunner(ModelRunnerBase):
         if self.parallel_config.tensor_parallel_size > 1:
             dtype = sampled_token_ids.dtype
             sampled_token_ids = sampled_token_ids.to("float32")
-            paddle.distributed.broadcast(sampled_token_ids, 0)
+            tensor_model_parallel_all_reduce_custom(sampled_token_ids)
             sampled_token_ids = sampled_token_ids.to(dtype)
         if self.is_hpu_perf_breakdown_sync_mode:
             sampled_token_ids.cpu()
