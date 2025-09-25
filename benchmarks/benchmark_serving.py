@@ -39,7 +39,7 @@ from backend_request_func import (
     RequestFuncInput,
     RequestFuncOutput,
 )
-from benchmark_dataset import EBChatDataset, EBDataset, SampleRequest
+from benchmark_dataset import EBChatDataset, EBDataset, SampleRequest, RandomDataset
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 from tqdm.asyncio import tqdm
 
@@ -830,6 +830,11 @@ def main(args: argparse.Namespace):
         ).sample(
             num_requests=args.num_prompts,
             output_len=args.sharegpt_output_len,
+        ),
+        "random": lambda: RandomDataset(dataset_path=args.dataset_path).sample(
+                num_requests=args.num_prompts,
+                input_len=args.random_input_len,
+                output_len=args.random_output_len,
         ),
     }
 
