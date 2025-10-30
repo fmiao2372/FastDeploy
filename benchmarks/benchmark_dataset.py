@@ -297,7 +297,7 @@ class EBChatDataset(BenchmarkDataset):
             json_data = entry
             prompt = entry["messages"][-1].get("content", "")
             history_QA = entry.get("messages", [])
-            new_output_len = int(entry.get("max_tokens", 12288))
+            # new_output_len = int(entry.get("max_tokens", 12288))
 
             if enable_multimodal_chat:
                 prompt = self.apply_multimodal_chat_transformation(prompt, None)
@@ -308,7 +308,7 @@ class EBChatDataset(BenchmarkDataset):
                     prompt=prompt,
                     prompt_len=0,
                     history_QA=history_QA,
-                    expected_output_len=new_output_len,
+                    expected_output_len=output_len,
                 )
             )
             cnt += 1
