@@ -125,8 +125,7 @@ class LLMEngine:
 
         self.engine.start()
 
-        if self.do_profile == 0 and (
-            self.cfg.cache_config.enable_prefix_caching or self.cfg.scheduler_config.splitwise_role != "mixed"
+        if self.do_profile == 0 and (self.cfg.scheduler_config.splitwise_role != "mixed"
         ):
             device_ids = self.cfg.device_ids.split(",")
             self.cache_manager_processes = self.engine.start_cache_service(device_ids, self.ipc_signal_suffix)
@@ -159,7 +158,7 @@ class LLMEngine:
         if self.do_profile:
             self._stop_profile()
 
-        if self.cfg.cache_config.enable_prefix_caching or self.cfg.scheduler_config.splitwise_role != "mixed":
+        if self.cfg.scheduler_config.splitwise_role != "mixed":
             self.launched_cache_manager_signal.value[0] = 1
 
         if api_server_pid is not None:
@@ -315,7 +314,7 @@ class LLMEngine:
         )
 
         # launched_cache_manager_signal 用于感知engine是否启动了cache_manager
-        if self.cfg.cache_config.enable_prefix_caching or self.cfg.scheduler_config.splitwise_role != "mixed":
+        if self.cfg.scheduler_config.splitwise_role != "mixed":
             launched_cache_manager_signal_data = np.zeros([1], dtype=np.int32)
             self.launched_cache_manager_signal = IPCSignal(
                 name="launched_cache_manager_signal",
@@ -614,7 +613,7 @@ class LLMEngine:
         num_gpu_blocks = self.get_profile_block_num_signal.value[0]
         self.cfg.cache_config.reset(num_gpu_blocks)
         self.engine.resource_manager.reset_cache_config(self.cfg.cache_config)
-        if self.cfg.cache_config.enable_prefix_caching or self.cfg.scheduler_config.splitwise_role != "mixed":
+        if self.cfg.scheduler_config.splitwise_role != "mixed":
             device_ids = self.cfg.device_ids.split(",")
             self.cache_manager_processes = self.engine.start_cache_service(device_ids, self.ipc_signal_suffix)
 

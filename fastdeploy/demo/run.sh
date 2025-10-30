@@ -17,3 +17,7 @@ export PROFILE_END=3
 
 rm -rf log hpu_logs
 FD_ATTENTION_BACKEND=HPU_ATTN python offline_demo.py
+
+# export FD_LOG_DIR="prefixcaching_log"
+# rm -rf $FD_LOG_DIR
+# FD_ATTENTION_BACKEND=HPU_ATTN python offline_prefix_caching_demo.py --enable_prefix_caching
