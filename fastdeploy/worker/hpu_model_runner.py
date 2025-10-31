@@ -186,6 +186,7 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int, max_
             share_inputs["first_token_ids"],
         )
         share_inputs["recover_lens"] = paddle.full([1], 0, dtype="int32").cpu()
+        share_inputs["not_need_stop"][0] = True
 
 
 # TODO: replace rebuild_padding_v3 in CustomDevice if we adopt this version pp optimization
@@ -1130,6 +1131,9 @@ class HPUModelRunner(ModelRunnerBase):
                     logger.info(
                         f"warmup prefill_batch: {prefill_batch}, prefill_length: {prefill_length}, context_len: {context_len} done"
                     )
+                    # when disable prefix caching, only run context_len = 0 for each prefill_batch
+                    if not self.cache_config.enable_prefix_caching:
+                        break
 
         decode_batchs = []
         decode_batch_step = int(os.environ.get("BATCH_STEP_DECODE", 4))
