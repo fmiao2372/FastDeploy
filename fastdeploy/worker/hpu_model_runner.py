@@ -162,6 +162,7 @@ def step_intel_hpu(share_inputs: Dict[str, paddle.Tensor], block_size: int, max_
         max_model_len,
     )
     if share_inputs["recover_lens"].item() > 0:
+        logger.info("recover block hpu happening ...")
         recover_block_hpu(
             share_inputs["recover_block_list"],
             share_inputs["recover_lens"],
