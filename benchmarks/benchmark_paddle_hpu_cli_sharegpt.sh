@@ -25,7 +25,14 @@ model_yaml="yaml/eb45-21b-a3b-32k-bf16.yaml"
 export SERVER_PORT=8188
 export no_proxy=.intel.com,intel.com,localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,192.168.1.0/24
 
-batch_size=128
+CARD_NUM=$1
+
+if [[ "$CARD_NUM" == "1" ]]; then
+       batch_size=128
+else
+       batch_size=64
+fi
+
 num_prompts=2000
 
 workspace=$(pwd)
