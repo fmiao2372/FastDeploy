@@ -337,11 +337,14 @@ class HPUAttentionBackend(AttentionBackend_HPU):
             qkv_proj.weight,
             qkv_proj.bias,
             o_proj.weight,
+            None,
+            None,
             self.head_dim,
             self.num_heads,
             scaling_factor=self.head_dim**-0.5,
             transpose=False,
             use_neox_style=layer.use_neox_rotary_style,
+            epsilon=1e-6,
         )
 
         # all_reduce
