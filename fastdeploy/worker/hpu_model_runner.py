@@ -306,6 +306,7 @@ from fastdeploy.model_executor.models.ernie4_5_moe import (
     Ernie4_5_MLP,
 )
 from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
+from fastdeploy.model_executor.models.qwen3 import Qwen3Attention
 
 
 def convert_model(model, measurement_mode=False):
@@ -319,6 +320,8 @@ def convert_model(model, measurement_mode=False):
             if isinstance(module, Ernie4_5_Attention):
                 module.forward = types.MethodType(fused_self_atten_forward, module)
             if isinstance(module, Qwen2Attention):
+                module.forward = types.MethodType(fused_self_atten_forward, module)
+            if isinstance(module, Qwen3Attention):
                 module.forward = types.MethodType(fused_self_atten_forward, module)
             if isinstance(module, Ernie4_5_MLP):
                 module.measurement_mode = measurement_mode
