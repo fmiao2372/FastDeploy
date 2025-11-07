@@ -726,6 +726,7 @@ class HPUModelRunner(ModelRunnerBase):
             self.share_inputs["seq_lens_decoder"],
             self.cache_config.block_size,
             self.parallel_config.dtype,
+            self.scheduler_config.max_num_batched_tokens,
         )
         is_prompt = is_prompt.item() == 1 if is_prompt.item() > 0 else None
         if is_prompt is True:
