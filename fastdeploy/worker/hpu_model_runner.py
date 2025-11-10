@@ -1093,12 +1093,13 @@ class HPUModelRunner(ModelRunnerBase):
         self.share_inputs["not_need_stop"][0] = True
 
     def warm_up_bucket(self) -> None:
-        max_prefill_batch = 3  # Hard-Code in FastDeploy/fastdeploy/engine/config.py
+        max_prefill_batch = int(os.getenv("MAX_PREFILL_NUM", "3"))
         warmup_max_model_len = min(
             int(os.environ.get("HPU_WARMUP_MODEL_LEN", 4096)), self.parallel_config.max_model_len
         )
         prefill_batchs = []
         prefill_batch_step = int(os.environ.get("BATCH_STEP_PREFILL", 1))
+        prefill_seq_step = int(os.environ.get("SEQUENCE_STEP_PREFILL", 128))
         current_prefill_batch = prefill_batch_step
         while current_prefill_batch <= max_prefill_batch:
             prefill_batchs.append(int(current_prefill_batch))
@@ -1108,7 +1109,7 @@ class HPUModelRunner(ModelRunnerBase):
         prefill_context_block_step = int(os.environ.get("CONTEXT_BLOCK_STEP_PREFILL", 1))
         for prefill_batch in prefill_batchs:
             for prefill_length_with_context in range(
-                self.cache_config.block_size, max_prefill_length, self.cache_config.block_size
+                self.cache_config.block_size, max_prefill_length, prefill_seq_step
             ):
                 if prefill_length_with_context * prefill_batch > self.scheduler_config.max_num_batched_tokens:
                     continue
