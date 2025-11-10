@@ -835,6 +835,7 @@ def main(args: argparse.Namespace):
                 num_requests=args.num_prompts,
                 input_len=args.random_input_len,
                 output_len=args.random_output_len,
+                random_range_ratio=args.random_range_ratio,
         ),
     }
 
