@@ -74,7 +74,8 @@ def reload_ep_checkpoint(model_path: str, fd_config: FDConfig, state_dict: dict,
             down_proj_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight_scale"
 
             down_proj_in_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.activation_scale"
-            up_gate_proj_in_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.activation_scale"
+            # single up_gate_proj.activation_scale for all mlp.experts
+            up_gate_proj_in_scale_key = f"ernie.layers.{i}.mlp.experts.up_gate_proj.activation_scale"
 
             num_local_ffn_keys.append(up_gate_proj_key)
             num_local_ffn_keys.append(down_proj_key)
