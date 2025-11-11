@@ -329,23 +329,33 @@ class RandomDataset(BenchmarkDataset):
         num_requests: int,
         input_len: int = 1024,
         output_len: int = 1024,
+        random_range_ratio: float = 1.0,
         **kwargs,
     ) -> list[SampleRequest]:
         requests = []
         cnt = 1
         for i in range(num_requests):
-            prompt = "hi" * (input_len - 7) # For Ernie-4.5-21B
+            if random_range_ratio < 1.0:
+                min_input = max(1, int(input_len * random_range_ratio))
+                min_output = max(1, int(output_len * random_range_ratio))
+                cur_input_len = random.randint(min_input, input_len)
+                cur_output_len = random.randint(min_output, output_len)
+            else:
+                cur_input_len = input_len
+                cur_output_len = output_len
+
+            prompt = "hi" * (cur_input_len - 7)  # For Ernie-4.5-21B
             requests.append(
                 SampleRequest(
                     no=cnt,
                     prompt=prompt,
-                    prompt_len=input_len,
+                    prompt_len=cur_input_len,
                     history_QA=[{
-                    'role': 'user',
-                    'content': prompt
+                        'role': 'user',
+                        'content': prompt
                     }],
                     json_data=None,
-                    expected_output_len=output_len,
+                    expected_output_len=cur_output_len,
                 )
             )
             cnt += 1
