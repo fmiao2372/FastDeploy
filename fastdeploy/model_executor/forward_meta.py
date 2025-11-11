@@ -319,6 +319,9 @@ class HPUForwardMeta:
     #
     pre_caches_length: int = 0
 
+    #
+    measurement_mode: bool = False
+
     @classmethod
     def init_forward_meta(cls, share_inputs: Dict, attn_backend: "AttentionBackend_HPU"):
         """init forward meta"""

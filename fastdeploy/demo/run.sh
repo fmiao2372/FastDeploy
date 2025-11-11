@@ -14,6 +14,7 @@ export PROFILE_END=3
 # export LOG_LEVEL_ALL=0
 # export FLAGS_intel_hpu_runtime_debug=1
 # export FLAGS_intel_hpu_reciperunner_debug=1
+export HPU_MEASUREMENT_MODE=0
 
 rm -rf log hpu_logs
 FD_ATTENTION_BACKEND=HPU_ATTN python offline_demo.py

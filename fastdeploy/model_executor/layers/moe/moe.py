@@ -60,7 +60,7 @@ def get_moe_method():
         from fastdeploy.model_executor.layers.backends import HpuMoEMethod
 
         return HpuMoEMethod(None)
-        # return HpuTensorWiseFP8MoEMethod(None)
+
     raise NotImplementedError
 
 
