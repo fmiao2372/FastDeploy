@@ -105,6 +105,8 @@ async def async_request_eb_openai_chat_completions(
 
         if request_func_input.ignore_eos:
             payload["ignore_eos"] = request_func_input.ignore_eos
+            # To support fixed length test
+            payload["min_tokens"] = request_func_input.output_len
 
         if request_func_input.debug:
             print(f"payload:{json.dumps(payload, ensure_ascii=False)}")

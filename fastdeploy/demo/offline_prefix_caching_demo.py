@@ -15,6 +15,7 @@
 """
 
 from fastdeploy import LLM, SamplingParams
+import argparse
 
 common_prefix = (
     "北京，中华人民共和国的首都，是一座融合了厚重历史与现代活力的超大城市。作为国家的政治中心、文化中心、国际交往中心和科技创新中心，北京承载着国家最高权力机关和众多国际机构。\n"
@@ -28,29 +29,98 @@ common_prefix = (
 
 prompts = [
     "北京作为中国的首都，主要承担着哪几个方面的中心职能？",
-    "文中提到了哪两处最具代表性的古代皇家祭祀与居所建筑？",
-    "文章分别列举了哪些具体实例来展现北京的“厚重历史”与“现代活力”？请各举两例",
 ]
 
 generating_prompts = [common_prefix + prompt for prompt in prompts]
 
 
-sampling_params = SamplingParams(temperature=1, top_p=0.0)
+sampling_params = SamplingParams(temperature=1, top_p=0.0, max_tokens=320)
 
-model = "baidu/ERNIE-4.5-21B-A3B-Paddle"
 
+parser = argparse.ArgumentParser(description="Offline Prefix Caching Demo")
+parser.add_argument("--model", type=str, default="/data/disk2/ERNIE-4.5-21B-A3B-Paddle", help="Path to the model")
+parser.add_argument("--engine_worker_queue_port", type=int, default=8182, help="Engine worker queue port")
+parser.add_argument("--cache_queue_port", type=int, default=8183, help="Cache queue port")
+parser.add_argument("--max_model_len", type=int, default=8192, help="Max model length")
+parser.add_argument("--enable_prefix_caching", action="store_true", help="Enable prefix caching")
+args = parser.parse_args()
+
+graph_optimization_config={"use_cudagraph":False}
 prefix_cached_llm = LLM(
-    model=model,
-    quantization="wint4",
-    enable_prefix_caching=True,
+    model=args.model,
+    enable_prefix_caching=args.enable_prefix_caching,
+    engine_worker_queue_port=args.engine_worker_queue_port,
+    cache_queue_port=args.cache_queue_port,
+    max_model_len=args.max_model_len,
+    num_gpu_blocks_override=6400,
+    graph_optimization_config=graph_optimization_config
 )
 
+# ============================================================================================================================================
+# prefix_outputs = prefix_cached_llm.generate(generating_prompts, sampling_params)
+# for output in prefix_outputs:
+#     prompt = output.prompt
+#     print("prompt\n", prompt)
+#     generated_text = output.outputs.text
+#     print("generated_text", generated_text)
+#     print("-" * 50)
 
-prefix_outputs = prefix_cached_llm.generate(generating_prompts, sampling_params)
+# # generating_prompts.insert(0, common_prefix + "北京有哪些著名的历史遗迹？")
+# # generating_prompts.append(common_prefix + "北京有哪些著名的历史遗迹？")
+# generating_prompts.insert(0, "北京有哪些著名的历史遗迹？")
+# generating_prompts.append("北京有哪些著名的历史遗迹？")
+# prefix_outputs = prefix_cached_llm.generate(generating_prompts, sampling_params)
+
+# # 输出结果
+# for output in prefix_outputs:
+#     prompt = output.prompt
+#     print("prompt\n", prompt)
+#     generated_text = output.outputs.text
+#     print("generated_text", generated_text)
+#     print("-" * 50)
+
+# ============================================================================================================================================
+LONG_PROMPT = (
+    "You are a helpful assistant in recognizes the content of tables in markdown format. Here is a table as follows.\n# Table\n"
+    + """
+| ID  | Name          | Age | Occupation    | Country       | Email                  | Phone Number   | Address                       |
+|-----|---------------|-----|---------------|---------------|------------------------|----------------|------------------------------|
+| 1   | John Doe      | 29  | Engineer      | USA           | john.doe@example.com   | 555-1234       | 123 Elm St, Springfield, IL  |
+| 2   | Jane Smith    | 34  | Doctor        | Canada        | jane.smith@example.com | 555-5678       | 456 Oak St, Toronto, ON      |
+| 3   | Alice Johnson | 27  | Teacher       | UK            | alice.j@example.com    | 555-8765       | 789 Pine St, London, UK      |
+| 26  | Xavier Green  | 34  | Scientist     | Canada        | xavier.g@example.com   | 555-9091       | 357 Oak St, Montreal, QC     |
+| 27  | Yara Red      | 41  | Teacher       | UK            | yara.r@example.com     | 555-1214       | 975 Pine St, Leeds, UK       |
+| 28  | Zack Blue     | 30  | Lawyer        | Australia     | zack.b@example.com     | 555-3436       | 135 Birch St, Adelaide, SA   |
+| 29  | Amy White     | 33  | Musician      | New Zealand   | amy.w@example.com      | 555-5658       | 159 Maple St, Wellington, NZ |
+| 30  | Ben Black     | 38  | Chef          | Ireland       | ben.b@example.com      | 555-7870       | 246 Fir St, Waterford, IE    |
+"""
+)
+
+prefix_outputs = prefix_cached_llm.generate([LONG_PROMPT
+        + "Question: what is the age of John Doe? Your answer: The age of John Doe is "], sampling_params)
+for output in prefix_outputs:
+    prompt = output.prompt
+    print("prompt\n", prompt)
+    generated_text = output.outputs.text
+    print("generated_text", generated_text)
+    print("-" * 50)
+
+prefix_outputs = prefix_cached_llm.generate([LONG_PROMPT
+        + "Question: what is the address of Jane Smith? Your answer: The address of Jane Smith is "], sampling_params)
+for output in prefix_outputs:
+    prompt = output.prompt
+    print("prompt\n", prompt)
+    generated_text = output.outputs.text
+    print("generated_text", generated_text)
+    print("-" * 50)
+
+prefix_outputs = prefix_cached_llm.generate(["What is Artificial Intelligence?", LONG_PROMPT
+        + "Question: what is the email of Alice Johnson? Your answer: The email of Alice Johnson is ", "What is Artificial Intelligence?"], sampling_params)
 
 # 输出结果
 for output in prefix_outputs:
     prompt = output.prompt
+    print("prompt\n", prompt)
     generated_text = output.outputs.text
     print("generated_text", generated_text)
     print("-" * 50)
