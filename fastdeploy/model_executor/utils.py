@@ -310,6 +310,11 @@ def is_paddle_support_v1_loader():
         # up
         up_tgt = tgt_tensor[exp_id][..., tgt_shape[2] // 2 :]
         up_tgt.copy_(src_tensor, False)
+        '''
+        # use the blow to workaround tensor.copy_(...)
+        tgt_tensor[exp_id][..., : tgt_shape[2] // 2] = src_tensor
+        tgt_tensor[exp_id][..., tgt_shape[2] // 2 :] = src_tensor
+        '''
     is_same = bool(paddle.all(tgt_tensor == 1))
     return is_same
 
@@ -368,6 +373,7 @@ def v1_loader_support(fd_config):
         or current_platform.is_xpu()
         or current_platform.is_iluvatar()
         or current_platform.is_maca()
+        or current_platform.is_intel_hpu()
     ):
         _err_msg("v1loader currently only support backends gpu, xpu, iluvatar and maca")
         return False
