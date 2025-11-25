@@ -19,6 +19,7 @@ from paddle import nn
 
 from fastdeploy.distributed.communication import tensor_model_parallel_all_reduce_custom
 from fastdeploy.model_executor.layers.moe.fused_moe_backend_base import MoEMethodBase
+from fastdeploy.model_executor.layers.utils import get_tensor
 
 
 class HpuMoEMethod(MoEMethodBase):
@@ -37,6 +38,14 @@ class HpuMoEMethod(MoEMethodBase):
         """
         # bf16
         up_gate_proj_weights, down_proj_weights, _, _ = layer.extract_moe_ffn_weights(state_dict)
+
+        up_gate_proj_expert_weight_key = layer.weight_key_map.get("up_gate_proj_expert_weight_key", None)
+        down_proj_expert_weight_key = layer.weight_key_map.get("down_proj_expert_weight_key", None)
+        # for measurement mode
+        self.up_gate_proj_act_scale_key = up_gate_proj_expert_weight_key.replace("{}.", "").replace(
+            "weight", "activation_scale"
+        )
+        self.down_proj_expert_act_scale_key = down_proj_expert_weight_key.replace("weight", "activation_scale")
 
         for idx, weights_tensor in enumerate([up_gate_proj_weights, down_proj_weights]):
             weights_list = []
@@ -87,58 +96,45 @@ class HpuMoEMethod(MoEMethodBase):
             raise NotImplementedError
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
-        """
-        weights = paddle.nn.functional.softmax(gate_out, axis=-1)
-        if layer.moe_use_gate_correction_bias:
-            scores = weights + layer.gate_correction_bias
-            _, selected_experts = paddle.topk(scores, layer.top_k, axis=-1)
-            routing_weights = paddle.index_sample(weights, selected_experts)
-        else:
-            routing_weights, selected_experts = paddle.topk(weights, layer.top_k, axis=-1)
-        routing_weights /= paddle.sum(routing_weights, axis=-1, keepdim=True)
-
-        common_inputs = (x, selected_experts, routing_weights.cast("bfloat16"))
-
-        common_params = (
-            False,  #permuted_weights
-            "silu", #activation,
-            0,
-            layer.num_experts - 1,
-        )
-
-        weights = (
-            layer.moe_ffn1_weight,
-            layer.moe_ffn2_weight,
-        )
-
-        fused_moe_out, _ = mixture_of_experts(
-            *common_inputs, *weights, *common_params, False
-        )
-
-        # if norm_topk_prob:
-        #     routing_weights_norm = paddle.sum(routing_weights, axis=-1, keepdim=True).cast("bfloat16")
-        #     fused_moe_out = fused_moe_out / routing_weights_norm
-        """
         chunk_size = 64
-        from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe
+        measurement_mode = getattr(layer, "measurement_mode", False)
+        if measurement_mode:
+            from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe_ref
 
-        # TODO: fuse matmul to gate_moe
-        gate_out = paddle.matmul(x.cast("float32"), gate.weight)
-        fused_moe_out = fused_gate_moe(
-            x,
-            gate_out,
-            layer.gate_correction_bias,
-            layer.up_gate_proj_weight,
-            layer.down_proj_weight,
-            layer.top_k,
-            layer.moe_use_gate_correction_bias,
-            norm_topk_prob=True,
-            permuted_weights=False,
-            activation="silu",
-            experts_min=layer.expert_id_offset,
-            experts_max=layer.expert_id_offset + layer.num_local_experts - 1,
-            chunk_size=chunk_size,
-        )
+            fused_moe_out = fused_gate_moe_ref(
+                x,
+                gate.weight,
+                layer.gate_correction_bias,
+                layer.up_gate_proj_weight,
+                layer.down_proj_weight,
+                layer.top_k,
+                norm_topk_prob=True,
+                permuted_weights=False,
+                activation="silu",
+                experts_min=layer.expert_id_offset,
+                experts_max=layer.expert_id_offset + layer.num_local_experts - 1,
+                chunk_size=chunk_size,
+                measurement_mode=True,
+                up_gate_act_scale_key=self.up_gate_proj_act_scale_key,
+                down_act_scale_key=self.down_proj_expert_act_scale_key,
+            )
+        else:
+            from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe
+
+            fused_moe_out = fused_gate_moe(
+                x,
+                gate.weight,
+                layer.gate_correction_bias,
+                layer.up_gate_proj_weight,
+                layer.down_proj_weight,
+                layer.top_k,
+                norm_topk_prob=True,
+                permuted_weights=False,
+                activation="silu",
+                experts_min=layer.expert_id_offset,
+                experts_max=layer.expert_id_offset + layer.num_local_experts - 1,
+                chunk_size=chunk_size,
+            )
         if layer.reduce_results and layer.tp_size > 1:
             tensor_model_parallel_all_reduce_custom(fused_moe_out)
 
@@ -150,6 +146,62 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
     Use Cutlass Group Gemm to compute Fused MoE.
     This method is the oldest way to compute MoE in Paddle.
     """
+
+    def process_prequanted_weights(self, layer: nn.Layer, state_dict, is_rearrange: bool = False):
+        """
+        Paddle HPU process prequanted weights.
+        """
+        up_gate_proj_weight, down_proj_weight, logical_expert_ids, _ = layer.extract_moe_ffn_weights(state_dict)
+        up_gate_proj_weight = [t.view(paddle.float8_e4m3fn) for t in up_gate_proj_weight]
+        down_proj_weight = [t.view(paddle.float8_e4m3fn) for t in down_proj_weight]
+
+        def _extract_scale_tensor(key_template, logical_expert_ids):
+            result = []
+            for i in logical_expert_ids:
+                result.append(get_tensor(state_dict.pop(key_template.format(i))))
+            return result  # bf16 tensor list
+
+        def _extract_descale_tensor(key_template, logical_expert_ids):
+            if key_template.format(0) in state_dict:
+                # Extract scale tensors for all logical_expert_ids
+                scale_tensors = []
+                for i in logical_expert_ids:
+                    scale_tensor = get_tensor(state_dict.pop(key_template.format(i)))
+                    scale_tensors.append(scale_tensor)
+                # Stack all scale tensors into one tensor
+                stacked = paddle.stack(scale_tensors)
+                reciprocal = 1.0 / stacked
+                # Take max over all logical_expert_ids (axis=0)
+                max_tensor = paddle.min(reciprocal, axis=0)
+                return max_tensor.cast(paddle.get_default_dtype())
+            else:
+                key = key_template.replace("{}.", "")
+                scale_tensor = get_tensor(state_dict.pop(key))
+                reciprocal = 1.0 / scale_tensor
+                return reciprocal.cast(paddle.get_default_dtype())
+
+        weight_key_map = layer.weight_key_map
+
+        up_gate_proj_expert_weight_scale_key = weight_key_map.get("up_gate_proj_expert_weight_scale_key", None)
+        down_proj_expert_weight_scale_key = weight_key_map.get("down_proj_expert_weight_scale_key", None)
+        up_gate_proj_expert_in_scale_key = weight_key_map.get("up_gate_proj_expert_in_scale_key", None)
+        down_proj_expert_in_scale_key = weight_key_map.get("down_proj_expert_in_scale_key", None)
+
+        up_gate_proj_weight_scale = _extract_scale_tensor(up_gate_proj_expert_weight_scale_key, logical_expert_ids)
+        down_proj_weight_scale = _extract_scale_tensor(down_proj_expert_weight_scale_key, logical_expert_ids)
+        up_gate_proj_in_scale = _extract_descale_tensor(up_gate_proj_expert_in_scale_key, logical_expert_ids)
+        down_proj_in_scale = _extract_scale_tensor(down_proj_expert_in_scale_key, logical_expert_ids)
+
+        name_tensor_map = {
+            "up_gate_proj_weight": up_gate_proj_weight,
+            "down_proj_weight": down_proj_weight,
+            "up_gate_proj_weight_scale": up_gate_proj_weight_scale,
+            "down_proj_weight_scale": down_proj_weight_scale,
+            "up_gate_proj_in_scale": up_gate_proj_in_scale,
+            "down_proj_in_scale": down_proj_in_scale,
+        }
+        for name, tensor_list in name_tensor_map.items():
+            setattr(layer, name, tensor_list)
 
     def create_weights(self, layer: nn.Layer, **extra_weight_attrs):
         # TODO: split create_parameter from process_loaded_weights
@@ -222,19 +274,17 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
         chunk_size = 64
         from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe_fp8
 
-        # TODO: fuse matmul to gate_moe
-        gate_out = paddle.matmul(x.cast("float32"), gate.weight)
         fused_moe_out = fused_gate_moe_fp8(
             x,
-            gate_out,
+            gate.weight,
             layer.gate_correction_bias,
             layer.up_gate_proj_weight,
             layer.down_proj_weight,
-            None,  # intermediate_hidden_states_scales
+            layer.up_gate_proj_in_scale,
+            layer.down_proj_in_scale,
             layer.up_gate_proj_weight_scale,
             layer.down_proj_weight_scale,
             layer.top_k,
-            layer.moe_use_gate_correction_bias,
             norm_topk_prob=True,
             permuted_weights=False,
             activation="silu",

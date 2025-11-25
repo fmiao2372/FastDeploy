@@ -64,20 +64,27 @@ def reload_ep_checkpoint(model_path: str, fd_config: FDConfig, state_dict: dict,
             fd_config.parallel_config.num_experts_start_offset,
             fd_config.parallel_config.num_experts_start_offset + fd_config.parallel_config.num_experts_per_rank,
         ):
-            ffn1_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.weight"
-            ffn2_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight"
+            up_gate_proj_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.weight"
+            down_proj_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight"
 
-            ffn1_quant_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.quant_weight"
-            ffn2_quant_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.quant_weight"
+            up_gate_proj_quant_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.quant_weight"
+            down_proj_quant_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.quant_weight"
 
-            ffn1_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.weight_scale"
-            ffn2_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight_scale"
-            num_local_ffn_keys.append(ffn1_key)
-            num_local_ffn_keys.append(ffn2_key)
-            num_local_ffn_keys.append(ffn1_quant_key)
-            num_local_ffn_keys.append(ffn2_quant_key)
-            num_local_ffn_keys.append(ffn1_scale_key)
-            num_local_ffn_keys.append(ffn2_scale_key)
+            up_gate_proj_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.up_gate_proj.weight_scale"
+            down_proj_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.weight_scale"
+
+            down_proj_in_scale_key = f"ernie.layers.{i}.mlp.experts.{j}.down_proj.activation_scale"
+            # single up_gate_proj.activation_scale for all mlp.experts
+            up_gate_proj_in_scale_key = f"ernie.layers.{i}.mlp.experts.up_gate_proj.activation_scale"
+
+            num_local_ffn_keys.append(up_gate_proj_key)
+            num_local_ffn_keys.append(down_proj_key)
+            num_local_ffn_keys.append(up_gate_proj_quant_key)
+            num_local_ffn_keys.append(down_proj_quant_key)
+            num_local_ffn_keys.append(up_gate_proj_scale_key)
+            num_local_ffn_keys.append(down_proj_scale_key)
+            num_local_ffn_keys.append(down_proj_in_scale_key)
+            num_local_ffn_keys.append(up_gate_proj_in_scale_key)
 
     for k in num_local_ffn_keys:
         if k in weight_list:
