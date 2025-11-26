@@ -14,52 +14,34 @@
 # limitations under the License.
 """
 
+import os
 import paddle
 from paddle import nn
 
 from fastdeploy.distributed.communication import tensor_model_parallel_all_reduce_custom
-from fastdeploy.model_executor.layers.moe.fused_moe_backend_base import MoEMethodBase
+from fastdeploy.model_executor.layers.moe.fused_moe_backend_base import MoEMethodBase, UnquantizedFusedMoEMethod
 from fastdeploy.model_executor.layers.utils import get_tensor
 
 
-class HpuMoEMethod(MoEMethodBase):
+class HpuMoEMethod(UnquantizedFusedMoEMethod):
     """
     Use Cutlass Group Gemm to compute Fused MoE.
     This method is the oldest way to compute MoE in Paddle.
     """
 
-    def create_weights(self, layer: nn.Layer, **extra_weight_attrs):
-        # TODO: split create_parameter from process_loaded_weights
-        return NotImplemented
-
     def process_loaded_weights(self, layer: nn.Layer, state_dict):
         """
         Paddle HPU load weight process.
         """
-        # bf16
-        up_gate_proj_weights, down_proj_weights, _, _ = layer.extract_moe_ffn_weights(state_dict)
-
-        up_gate_proj_expert_weight_key = layer.weight_key_map.get("up_gate_proj_expert_weight_key", None)
-        down_proj_expert_weight_key = layer.weight_key_map.get("down_proj_expert_weight_key", None)
-        # for measurement mode
-        self.up_gate_proj_act_scale_key = up_gate_proj_expert_weight_key.replace("{}.", "").replace(
-            "weight", "activation_scale"
+        up_gate_proj_weights, down_proj_weights, logical_expert_ids, ep_rank_to_expert_id_list = (
+            layer.extract_moe_ffn_weights(state_dict)
         )
-        self.down_proj_expert_act_scale_key = down_proj_expert_weight_key.replace("weight", "activation_scale")
+        stacked_up_gate_proj_weights = paddle.stack(up_gate_proj_weights, axis=0)
+        stacked_down_proj_weights = paddle.stack(down_proj_weights, axis=0)
 
-        for idx, weights_tensor in enumerate([up_gate_proj_weights, down_proj_weights]):
-            weights_list = []
-            for i in range(layer.num_local_experts):
-                weight_tensor = weights_tensor[i]
-                weight = layer.create_parameter(
-                    shape=weight_tensor.shape,
-                    dtype=weight_tensor.dtype,
-                    default_initializer=paddle.nn.initializer.Constant(0),
-                )
-                weight.set_value(weight_tensor)
-                weights_list.append(weight)
-            weights_name = self.added_weight_attrs[idx]
-            setattr(layer, weights_name, weights_list)
+        layer.up_gate_proj_weight.set_value(stacked_up_gate_proj_weights)
+        layer.down_proj_weight.set_value(stacked_down_proj_weights)
+
 
     def apply_ep_prefill(
         self,
@@ -96,7 +78,7 @@ class HpuMoEMethod(MoEMethodBase):
             raise NotImplementedError
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
-        chunk_size = 64
+        chunk_size = int(os.environ.get("HPU_CHUNK_SIZE", 64))
         measurement_mode = getattr(layer, "measurement_mode", False)
         if measurement_mode:
             from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe_ref
