@@ -14,6 +14,8 @@
 # limitations under the License.
 """
 
+import os
+
 import paddle
 from paddle import nn
 
@@ -85,7 +87,7 @@ class HpuMoEMethod(UnquantizedFusedMoEMethod):
             raise NotImplementedError
 
         # norm_topk_prob = False if layer.topk_method == "noaux_tc" else True
-        chunk_size = 64
+        chunk_size = int(os.environ.get("HPU_CHUNK_SIZE", 64))
         measurement_mode = getattr(layer, "measurement_mode", False)
         if measurement_mode:
             from fastdeploy.model_executor.ops.intel_hpu import fused_gate_moe_ref
