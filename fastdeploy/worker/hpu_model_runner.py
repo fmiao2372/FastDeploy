@@ -311,26 +311,9 @@ from fastdeploy.model_executor.layers.moe.moe import FusedMoE
 from fastdeploy.model_executor.models.ernie4_5_moe import (
     Ernie4_5_Attention,
     Ernie4_5_MLP,
-    Ernie4_5_DecoderLayer,
 )
 from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
 from fastdeploy.model_executor.models.qwen3 import Qwen3Attention
-from fastdeploy.model_executor.models.qwen3moe import Qwen3DecoderLayer
-
-
-def process_moe_weights_after_loading(layer) -> None:
-    if hasattr(layer.mlp, "experts"):
-        experts = layer.mlp.experts
-        num_experts = experts.num_experts
-
-        up_gate_proj_weight = [experts.up_gate_proj_weight[i] for i in range(num_experts)]
-        down_proj_weight = [experts.down_proj_weight[i] for i in range(num_experts)]
-
-        del layer.mlp.experts.up_gate_proj_weight
-        del layer.mlp.experts.down_proj_weight
-
-        layer.mlp.experts.up_gate_proj_weight = up_gate_proj_weight
-        layer.mlp.experts.down_proj_weight = down_proj_weight
 
 
 def convert_model(model, measurement_mode=False):
@@ -352,10 +335,6 @@ def convert_model(model, measurement_mode=False):
                 module.forward = types.MethodType(fused_mlp_forward, module)
             if isinstance(module, Qwen2MLP):
                 module.forward = types.MethodType(fused_mlp_forward, module)
-            if isinstance(module, Ernie4_5_DecoderLayer):
-                process_moe_weights_after_loading(module)
-            if isinstance(module, Qwen3DecoderLayer):
-                process_moe_weights_after_loading(module)
             convert_model(module, measurement_mode)
         else:
             if isinstance(module, Attention):
