@@ -50,7 +50,6 @@ class HpuTensorWiseFP8LinearMethod(TensorWiseFP8LinearMethod):
         act_scale = get_tensor(state_dict.pop(layer.act_scale_key))
         act_scale = 1.0 / act_scale
 
-        # quant_weight = quant_weight.transpose([1, 0]).contiguous()
         layer.weight.copy_(quant_weight.view("float8_e4m3fn"), False)
         layer.weight_scale.set_value(weight_scale.astype(paddle.get_default_dtype()))
         layer.act_scale.set_value(act_scale.astype(paddle.get_default_dtype()))

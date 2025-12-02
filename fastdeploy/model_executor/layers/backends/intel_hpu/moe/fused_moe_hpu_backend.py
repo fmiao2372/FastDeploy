@@ -161,9 +161,9 @@ class HpuTensorWiseFP8MoEMethod(HpuMoEMethod):
                 # Stack all scale tensors into one tensor
                 stacked = paddle.stack(scale_tensors)
                 reciprocal = 1.0 / stacked
-                # Take max over all logical_expert_ids (axis=0)
-                max_tensor = paddle.min(reciprocal, axis=0)
-                return max_tensor.cast(paddle.get_default_dtype())
+                # Take min over all logical_expert_ids (axis=0)
+                min_tensor = paddle.min(reciprocal, axis=0)
+                return min_tensor.cast(paddle.get_default_dtype())
             else:
                 key = key_template.replace("{}.", "")
                 scale_tensor = get_tensor(state_dict.pop(key))
