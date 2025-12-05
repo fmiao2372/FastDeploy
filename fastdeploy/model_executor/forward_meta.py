@@ -342,7 +342,7 @@ class HPUForwardMeta(ForwardMeta):
     #
     pre_caches_length: int = 0
 
-    #
+    # AMAX measurement of activations in bf16 mode for quantization calibration
     measurement_mode: bool = False
 
     @classmethod
