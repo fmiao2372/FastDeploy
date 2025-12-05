@@ -262,14 +262,25 @@ def fused_self_atten_forward(
     return atten_out
 
 
-def fused_mlp_forward(self, x):
-    """ """
+def fused_mlp_forward(
+    self,
+    hidden_states: paddle.Tensor,
+    forward_meta: Optional[ForwardMeta] = None,
+):
+    """
+    The forward function for the MLP (Multi-Layer Perceptron) layer.
+    Args:
+        hidden_states (paddle.Tensor): The input tensor to the MLP layer.
+        forward_meta (Optional[ForwardMeta]): Optional metadata for the forward pass.
+    Returns:
+        paddle.Tensor: The output tensor after applying the MLP layer and (optionally) all-reduce.
+    """
     measurement_mode = getattr(self, "measurement_mode", False)
     if measurement_mode:
         up_gate_proj_act_scale_key = self.up_gate_proj.weight_key.replace("weight", "activation_scale")
         down_proj_act_scale_key = self.down_proj.weight_key.replace("weight", "activation_scale")
         out = fused_mlp_ref(
-            x,
+            hidden_states,
             self.up_gate_proj.weight,
             None,
             self.down_proj.weight,
@@ -280,7 +291,7 @@ def fused_mlp_forward(self, x):
         )
     else:
         out = fused_mlp(
-            x,
+            hidden_states,
             self.up_gate_proj.weight,
             None,
             self.down_proj.weight,
