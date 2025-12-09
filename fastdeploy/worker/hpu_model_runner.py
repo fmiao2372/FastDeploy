@@ -326,12 +326,14 @@ from fastdeploy.model_executor.models.qwen2 import Qwen2Attention, Qwen2MLP
 from fastdeploy.model_executor.models.qwen3 import Qwen3Attention
 
 
-def convert_model(model, measurement_mode=False):
+def convert_model(model, measurement_mode=False, init_done=False):
     """ """
     if measurement_mode:
         from fastdeploy.model_executor.ops.intel_hpu import init_measure_dict
 
-        init_measure_dict()
+        if not init_done:
+            init_measure_dict()
+
     for name, module in model.named_children():
         if len(list(module.named_children())) > 0:
             if isinstance(module, Ernie4_5_Attention):
@@ -345,7 +347,7 @@ def convert_model(model, measurement_mode=False):
                 module.forward = types.MethodType(fused_mlp_forward, module)
             if isinstance(module, Qwen2MLP):
                 module.forward = types.MethodType(fused_mlp_forward, module)
-            convert_model(module, measurement_mode)
+            convert_model(module, measurement_mode, True)
         else:
             if isinstance(module, Attention):
                 module.measurement_mode = measurement_mode
@@ -877,7 +879,7 @@ class HPUModelRunner(ModelRunnerBase):
         # 3. Load drafter model(for speculative decoding)
 
         # 4. Convert model to HPU format
-        self.model = convert_model(self.model, measurement_mode=self.measurement_mode)
+        self.model = convert_model(self.model, measurement_mode=self.measurement_mode, init_done=False)
 
         time_after_load = time.perf_counter()
         logger.info(f"Model loading took {time_after_load - time_before_load} seconds")

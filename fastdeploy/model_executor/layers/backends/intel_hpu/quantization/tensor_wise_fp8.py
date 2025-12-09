@@ -35,6 +35,7 @@ class HpuTensorWiseFP8LinearMethod(TensorWiseFP8LinearMethod):
         quant_config: TensorWiseFP8Config,
     ) -> None:
         super().__init__(quant_config)
+        self.max_bound = 240.0
 
     def process_prequanted_weights(self, layer, state_dict, is_rearrange: bool = False) -> None:
         """
@@ -48,14 +49,21 @@ class HpuTensorWiseFP8LinearMethod(TensorWiseFP8LinearMethod):
         quant_weight = get_tensor(state_dict.pop(layer.weight_key))
         weight_scale = get_tensor(state_dict.pop(layer.weight_scale_key))
         act_scale = get_tensor(state_dict.pop(layer.act_scale_key))
-        act_scale = 1.0 / act_scale
+
+        # these activation_scale will fall in, but only quant for self_attn
+        # mlp.shared_experts.up_gate_proj / down_proj
+        # self_attn.qkv_proj / o_proj
+        if "self_attn" in layer.act_scale_key:
+            act_scale_inv = act_scale / self.max_bound
+            act_scale = self.max_bound / act_scale
+        else:
+            act_scale_inv = act_scale
+            act_scale = 1.0 / act_scale
 
         layer.weight.copy_(quant_weight.view("float8_e4m3fn"), False)
         layer.weight_scale.set_value(weight_scale.astype(paddle.get_default_dtype()))
         layer.act_scale.set_value(act_scale.astype(paddle.get_default_dtype()))
-
-        self.act_scale = act_scale.item()
-        self.total_scale = (act_scale * weight_scale).item()
+        layer.act_scale_inv.set_value(act_scale_inv.astype(paddle.get_default_dtype()))
 
     def create_weights(self, layer: nn.Layer, **extra_weight_attrs) -> None:
         """
@@ -74,6 +82,11 @@ class HpuTensorWiseFP8LinearMethod(TensorWiseFP8LinearMethod):
             is_bias=False,
         )
         layer.act_scale = layer.create_parameter(
+            shape=[1],
+            dtype="bfloat16",
+            is_bias=False,
+        )
+        layer.act_scale_inv = layer.create_parameter(
             shape=[1],
             dtype="bfloat16",
             is_bias=False,
