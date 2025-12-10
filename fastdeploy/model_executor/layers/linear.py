@@ -49,6 +49,43 @@ class UnquantizedLinearMethod(QuantMethodBase):
             is_bias=False,
             default_initializer=paddle.nn.initializer.Constant(0),
         )
+
+        layer.weight_k = layer.create_parameter(
+            shape= [4096, 1024],   # Qwen3.
+            #shape = [512],    # Qwen2.
+            dtype=layer.weight_dtype,
+            is_bias=False,
+            default_initializer=paddle.nn.initializer.Constant(0),
+        )
+
+        layer.weight_v = layer.create_parameter(
+            shape= [4096, 1024],
+            dtype=layer.weight_dtype,
+            is_bias=False,
+            default_initializer=paddle.nn.initializer.Constant(0),
+        )
+
+        layer.weight_q = layer.create_parameter(
+            shape= [4096, 4096],
+            dtype=layer.weight_dtype,
+            is_bias=False,
+            default_initializer=paddle.nn.initializer.Constant(0),
+        )
+
+        layer.weight_up = layer.create_parameter(
+            shape= [4096, 12288],    # Qwen3
+            dtype=layer.weight_dtype,
+            is_bias=False,
+            default_initializer=paddle.nn.initializer.Constant(0),
+        )
+
+        layer.weight_gate = layer.create_parameter(
+            shape= [4096, 12288],    # Qwen3
+            dtype=layer.weight_dtype,
+            is_bias=False,
+            default_initializer=paddle.nn.initializer.Constant(0),
+        )
+
         split_axis = extra_weight_attrs.get("split_axis")
         if hasattr(layer, "nranks") and layer.nranks > 0:
             _set_var_distributed(layer.weight, split_axis=split_axis)
@@ -530,6 +567,15 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 shard_size = (self.local_rank + 1) * block_size
                 loaded_weight = slice_fn(loaded_weight, output_dim, start=shard_offset, end=shard_size)
             loaded_weight = get_tensor(loaded_weight)
+
+            if loaded_shard_id == "gate":
+                print(">> loaded_weight gate:", loaded_weight)
+                self.weight_gate.set_value(loaded_weight)
+
+            if loaded_shard_id == "up":
+                print(">> loaded_weight up:", loaded_weight)
+                self.weight_up.set_value(loaded_weight)
+
             if not param._is_initialized():
                 param.initialize()
             param_shard_size = output_size // 2
@@ -669,6 +715,18 @@ class QKVParallelLinear(ColumnParallelLinear):
                 loaded_weight = slice_fn(loaded_weight, output_dim, start=shard_offset, end=shard_offset + shard_size)
 
             loaded_weight = get_tensor(loaded_weight)
+
+            if loaded_shard_id == "k":
+                print(">> loaded_weight k:", loaded_weight)
+                self.weight_k.set_value(loaded_weight)
+
+            if loaded_shard_id == "q":
+                print(">> loaded_weight q:", loaded_weight)
+                self.weight_q.set_value(loaded_weight)
+
+            if loaded_shard_id == "v":
+                print(">> loaded_weight v:", loaded_weight)
+                self.weight_v.set_value(loaded_weight)
 
             if not param._is_initialized():
                 param.initialize()

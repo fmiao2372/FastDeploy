@@ -295,9 +295,11 @@ class HPUAttentionBackend(AttentionBackend_HPU):
                 qkv_act_scale_key=qkv_proj_act_scale_key,
             )
         else:
+            new_qkv_weight = paddle.concat([qkv_proj.weight_q, qkv_proj.weight_k, qkv_proj.weight_v], axis=-1)
             query_states, key_value_states = fused_qkv_rope(
                 src,
-                qkv_proj.weight,
+                #qkv_proj.weight,
+                new_qkv_weight,
                 qkv_proj.bias,
                 forward_meta.rotary_embs,
                 getattr(qkv_proj, "act_scale", None),
@@ -437,6 +439,7 @@ class HPUAttentionBackend(AttentionBackend_HPU):
                 o_act_scale_key=o_proj_act_scale_key,
             )
         else:
+            new_qkv_weight = paddle.concat([qkv_proj.weight_q, qkv_proj.weight_k, qkv_proj.weight_v], axis=-1)
             out_linear_out = fused_block_attention(
                 src,
                 forward_meta.rotary_embs,
@@ -448,7 +451,8 @@ class HPUAttentionBackend(AttentionBackend_HPU):
                 forward_meta.attention_mask,
                 forward_meta.block_indices,
                 forward_meta.block_offsets,
-                qkv_proj.weight,
+                #qkv_proj.weight,
+                new_qkv_weight,
                 qkv_proj.bias,
                 o_proj.weight,
                 q_norm.weight if q_norm is not None else None,

@@ -280,9 +280,12 @@ def fused_mlp_forward(self, x):
             down_act_scale_key=down_proj_act_scale_key,
         )
     else:
+        new_up_gate_weight = paddle.concat([self.up_gate_proj.weight_gate, self.up_gate_proj.weight_up], axis=-1)
+
         out = fused_mlp(
             x,
-            self.up_gate_proj.weight,
+            #self.up_gate_proj.weight,
+            new_up_gate_weight,
             None,
             self.down_proj.weight,
             getattr(self.up_gate_proj, "act_scale", None),
