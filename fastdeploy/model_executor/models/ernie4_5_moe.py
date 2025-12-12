@@ -765,6 +765,7 @@ class Ernie4_5_MoePretrainedModel(PretrainedModel):
         WeightMeta(
             f".layers.{{{layerid.MOE_LAYER_ID}}}.mlp.experts.{{{layerid.EXPERT_ID}}}.up_gate_proj.weight_scale",
             True,
+            tsm.PairFused,
         ),
         WeightMeta(
             f".layers.{{{layerid.MOE_LAYER_ID}}}.mlp.experts.{{{layerid.EXPERT_ID}}}.down_proj.quant_weight",
