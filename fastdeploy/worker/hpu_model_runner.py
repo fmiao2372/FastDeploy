@@ -507,7 +507,7 @@ class HPUModelRunner(ModelRunnerBase):
                 logger.debug(
                     f"Handle prefill request {request} at idx {idx}, "
                     f"{prefill_start_index=}, {prefill_end_index=}, "
-                    f"need_prefilled_token_num={len(input_ids)}"
+                    f"need_prefilled_token_num={len(input_ids)},"
                     f"prompt_len={prompt_len}"
                 )
                 self.share_inputs["input_ids"][idx : idx + 1, :length] = np.array(
