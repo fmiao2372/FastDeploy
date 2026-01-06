@@ -656,7 +656,7 @@ class HPUAttentionBackend(AttentionBackend_HPU):
                 o_proj_act_scale_key = o_proj.weight_key.replace("weight", "activation_scale")
                 out_linear_out_decoder = fused_block_attention_ref(
                     src[-decoder_num:],
-                    forward_meta.rotary_embs,
+                    forward_meta.rotary_embs_decoder,
                     forward_meta.caches[2 * layer.layer_id],
                     forward_meta.caches[2 * layer.layer_id + 1],
                     forward_meta.block_groups_decoder,

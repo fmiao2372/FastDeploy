@@ -373,7 +373,6 @@ class HPUForwardMeta(ForwardMeta):
     def init_forward_meta(cls, share_inputs: Dict, attn_backend: "AttentionBackend_HPU"):
         """init forward meta"""
         # TODO(gongshaotian): delete this func
-        forward_mode = ForwardMode.MIXED
         if share_inputs["total_batch_encoder"] > 0 and share_inputs["total_batch_decoder"] > 0:
             forward_mode = ForwardMode.MIXED
         elif share_inputs["total_batch_encoder"] > 0:

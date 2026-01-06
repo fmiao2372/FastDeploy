@@ -233,12 +233,12 @@ def rebuild_padding_mixed_v3_1(
     dim_emb = tmp_out.shape[-1]
     output_data = paddle.zeros((total_batch_encoder + total_batch_decoder, dim_emb))
 
-    len = int((tmp_out.shape[0] - total_batch_decoder) / total_batch_encoder)
+    encoder_chunk_len = int((tmp_out.shape[0] - total_batch_decoder) / total_batch_encoder)
     position = 0
     for i in range(batch_ids_encoder.shape[0]):
         encoder_id = batch_ids_encoder[i].item()
         seq_len = seq_lens_encoder[encoder_id].item()
-        output_data[position] = tmp_out[i * len + seq_len - 1]
+        output_data[position] = tmp_out[i * encoder_chunk_len + seq_len - 1]
         position += 1
 
     for i in range(batch_ids_decoder.shape[0]):
